@@ -11,7 +11,7 @@ import {
   startNewJob,
 } from "@/engine/career";
 import { applyDirectorPlan, directorBrief } from "@/engine/director";
-import { undecided } from "@/engine/plan";
+import { planCost, undecided } from "@/engine/plan";
 import { advanceFromBackPage, finishCheckin, finishFriday, resolveWeek } from "@/engine/resolve";
 import { newGame } from "@/engine/setup";
 import type { CompanyId, DirectorPlan, GameState } from "@/engine/types";
@@ -38,6 +38,7 @@ import {
   ReviewScreen,
   TitleScreen,
 } from "./phases";
+import { track } from "./analytics";
 import { loadSave, writeSave } from "./save";
 import { Tutorial, tutorialSeen } from "./tutorial";
 import { Calendar, Dock, Header, type Tab } from "./ui";
@@ -145,6 +146,7 @@ export default function Game() {
     setGame(s);
     setOnTitle(false);
     setView({ name: "week" });
+    track("career_start", { company });
     if (!tutorialSeen()) setIntro("first");
     else toast("New career · your team is ready");
   };
@@ -161,6 +163,7 @@ export default function Game() {
         finishLabel={intro === "first" ? "Start week 1 →" : intro === "replay" ? "Back to the game →" : "Got it →"}
         onDone={() => {
           if (intro === "first") toast("Your team is ready · start with the red demand");
+          track("tutorial_done", { mode: intro });
           setIntro(null);
         }}
       />
@@ -239,6 +242,9 @@ export default function Game() {
             s={game}
             onContinue={() => {
               const next = applyReview(game);
+              const r = game.review!;
+              track("quarter_review", { company: game.company, level: game.level, quarter: game.quarter, grade: r.grade, outcome: r.outcome, score: r.weighted });
+              if (next.runEnd) track("run_end", { result: next.runEnd, quarters: next.history.filter((h) => h.grade !== "New role").length, company: next.company });
               setGame(next);
               setView({ name: "week" });
               if (next.phase === "plan") toast(next.level !== game.level ? `${next.level} · ${next.engineers.length} engineers · ${next.capacity} slots` : `Q${next.quarter} begins · same squad`);
@@ -253,14 +259,19 @@ export default function Game() {
         content = (
           <OfferScreen
             s={game}
-            onAccept={() => setGame(acceptOffer(game))}
+            onAccept={() => {
+              track("career_offer", { kind: game.pendingOffer!.kind, action: "accept", company: game.pendingOffer!.company, level: game.pendingOffer!.level });
+              setGame(acceptOffer(game));
+            }}
             onBack={() => setGame(backToHunt(game))}
             onDecline={() => {
+              track("career_offer", { kind: "poach", action: "decline", company: game.pendingOffer!.company, level: game.pendingOffer!.level });
               setGame(declineOffer(game));
               toast("Offer declined · squad Loyalty ↑");
             }}
             onLeverage={() => {
               const before = game.stakeholders.find((x) => x.role === "skip")!.trust;
+              track("career_offer", { kind: "poach", action: "leverage", company: game.pendingOffer!.company, level: game.pendingOffer!.level });
               const next = leverageOffer(game);
               const after = next.stakeholders.find((x) => x.role === "skip")!.trust;
               setGame(next);
@@ -302,6 +313,21 @@ export default function Game() {
       return;
     }
     const resolved = resolveWeek(game);
+    const used = planCost(game);
+    track("week_locked", {
+      company: game.company,
+      level: game.level,
+      quarter: game.quarter,
+      week: game.week,
+      slots_used: used,
+      capacity: game.capacity,
+      overbooked: used > game.capacity,
+      ignored: game.inbox.filter((i) => game.plan.choices[i.id] === "ignore").length,
+      inbox_source: game.inboxSource.by,
+    });
+    for (const item of game.inbox) {
+      track("demand_decision", { event_type: item.type, choice: game.plan.choices[item.id] ?? "ignore", required: item.required, company: game.company });
+    }
     setGame(resolved);
     void askDirector(resolved);
   };
