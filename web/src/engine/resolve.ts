@@ -2,7 +2,7 @@
 
 import { COMPANIES, KEYNOTE_WEEK } from "@/content/companies";
 import { TRAIT_LABEL } from "@/content/people";
-import { buildInbox, rememberTypes } from "./inbox";
+import { fillInbox, rememberTypes } from "./inbox";
 import {
   capacityFor,
   FOCUS_RELIEF,
@@ -492,7 +492,7 @@ export function startWeek(s: GameState, week: number): GameState {
     d.capacity = capacityFor(d.level, d.stress);
     const oncall = d.plan.oncallId && d.engineers.some((e) => e.id === d.plan.oncallId) ? d.plan.oncallId : null;
     d.plan = { choices: {}, oneOnOnes: [], focus: false, spend: [], oncallId: oncall };
-    d.inbox = buildInbox(d);
+    fillInbox(d);
   });
 }
 

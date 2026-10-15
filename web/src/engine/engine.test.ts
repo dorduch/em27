@@ -4,7 +4,8 @@ import { blockingItem, capacityFor, choose, ignoreRest, planCost, toggleOneOnOne
 import { advanceFromBackPage, finishCheckin, finishFriday, resolveWeek } from "./resolve";
 import { bossSteps, computeReview, gradeFor, shiftGrade, weightedScore } from "./review";
 import { applyReview, acceptOffer, startNewJob } from "./career";
-import type { GameState, ReviewResult } from "./types";
+import type { DirectorPlan, GameState, ReviewResult } from "./types";
+import { applyDirectorPlan, directorBrief } from "./director";
 import { buildInbox as buildInboxFor } from "./inbox";
 
 const game = (seed = 42) => newGame("Stripe", seed);
@@ -270,5 +271,64 @@ describe("company mechanics", () => {
     expect(blocked.outcome).toBe("stay");
     expect(blocked.packetApproved).toBe(false);
     expect(computeReview({ ...strong, packet: 10 }).outcome).toBe("promotion");
+  });
+});
+
+describe("AI director", () => {
+  /** Play week 1 to Friday so a director brief exists for week 2. */
+  const friday = () => {
+    let s = game(31);
+    const req = blockingItem(s)!;
+    s = choose(s, req.id, req.intents[0].id);
+    return resolveWeek(s);
+  };
+  const toMonday = (s: GameState) => advanceFromBackPage(finishFriday(s));
+
+  it("builds a brief for next week with candidate ids", () => {
+    const brief = directorBrief(friday())!;
+    expect(brief.week).toBe(2);
+    expect(brief.candidates.length).toBeGreaterThan(brief.pick);
+    expect(new Set(brief.candidates.map((c) => c.id)).size).toBe(brief.candidates.length);
+  });
+
+  it("uses a valid plan: its picks, its must-respond item and its reasons", () => {
+    const s = friday();
+    const brief = directorBrief(s)!;
+    const byType = new Map<string, string>();
+    for (const c of brief.candidates) if (!byType.has(c.type)) byType.set(c.type, c.id);
+    const picks = [...byType.values()].slice(0, brief.pick);
+    const requiredId = picks.find((id) => brief.candidates.find((c) => c.id === id)!.canBeMustRespond)!;
+    const plan: DirectorPlan = {
+      quarter: brief.quarter,
+      week: brief.week,
+      picks,
+      requiredId,
+      rationale: Object.fromEntries(picks.map((id) => [id, `reason for ${id}`])),
+      arcNote: "Build pressure before the check-in.",
+    };
+    const { state, accepted } = applyDirectorPlan(s, plan);
+    expect(accepted).toBe(true);
+    const monday = toMonday(state);
+    expect(monday.inboxSource).toEqual({ by: "director", arcNote: plan.arcNote });
+    const regular = monday.inbox.filter((i) => i.cat !== "FOLLOW-UP");
+    expect(regular.map((i) => i.type).sort()).toEqual(picks.map((id) => id.split(":")[0]).sort());
+    expect(regular.filter((i) => i.required).map((i) => i.type)).toEqual([requiredId.split(":")[0]]);
+    expect(regular.every((i) => i.why?.startsWith("reason for"))).toBe(true);
+    expect(monday.directorPlan).toBeNull();
+  });
+
+  it("rejects bad plans and falls back to the random draw", () => {
+    const s = friday();
+    const brief = directorBrief(s)!;
+    const ids = brief.candidates.map((c) => c.id);
+    const bad: DirectorPlan[] = [
+      { quarter: 1, week: 2, picks: ["made_up:0", ...ids.slice(1, brief.pick)], requiredId: null, rationale: {}, arcNote: "" },
+      { quarter: 1, week: 2, picks: ids.slice(0, brief.pick - 1), requiredId: null, rationale: {}, arcNote: "" },
+      { quarter: 1, week: 3, picks: ids.slice(0, brief.pick), requiredId: null, rationale: {}, arcNote: "" },
+    ];
+    for (const plan of bad) expect(applyDirectorPlan(s, plan).accepted).toBe(false);
+    const monday = toMonday(s);
+    expect(monday.inboxSource.by).toBe("random");
+    expect(monday.inbox.filter((i) => i.required).length).toBeLessThanOrEqual(1);
   });
 });

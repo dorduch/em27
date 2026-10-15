@@ -2254,3 +2254,28 @@ body {
 .cause-list .delta + .delta {
   margin-top: 0;
 }
+.director-panel {
+  margin: 10px 0 4px;
+}
+.director-panel summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+}
+.director-panel .panel {
+  margin-top: 6px;
+}
+/* Title screen wordmark (design-assets/logos/01-season-wordmark.png) */
+.title-logo h1 {
+  margin: 8px 0 0;
+  line-height: 0;
+}
+.title-logo h1 img {
+  float: none;
+  display: block;
+  width: 100%;
+  height: auto;
+}

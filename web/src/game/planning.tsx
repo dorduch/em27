@@ -54,7 +54,7 @@ const slots = (n: number) => `${n} slot${n === 1 ? "" : "s"}`;
 
 /* ---------------- Week ---------------- */
 
-export function WeekScreen({ s, set, go, toast }: ScreenProps) {
+export function WeekScreen({ s, set, go, toast, directorStatus }: ScreenProps & { directorStatus?: string }) {
   const used = planCost(s);
   const open = undecided(s);
   const optionalOpen = open.filter((i) => !i.required).length;
@@ -126,10 +126,47 @@ export function WeekScreen({ s, set, go, toast }: ScreenProps) {
           ↷ Ignore the other {optionalOpen} undecided · 0 slots
         </Btn>
       )}
+      <DirectorPanel s={s} status={directorStatus} />
       <Agenda s={s} set={set} go={go} toast={toast} />
       {s.company === "Google" && <Btn onClick={() => go({ name: "packet" })}>Inspect promotion packet →</Btn>}
       <p className="save-status">✓ Plan saved on this device</p>
     </>
+  );
+}
+
+/** Debug view: who chose this week's demands, and why. Collapsed by default. */
+function DirectorPanel({ s, status }: { s: GameState; status?: string }) {
+  const byDirector = s.inboxSource.by === "director";
+  return (
+    <details className="director-panel">
+      <summary>{byDirector ? "◆ Picked by the AI director · why?" : "◇ Random draw this week · details"}</summary>
+      {byDirector ? (
+        <>
+          {s.inboxSource.arcNote && (
+            <p className="helper">
+              <b>Arc:</b> {s.inboxSource.arcNote}
+            </p>
+          )}
+          <div className="panel">
+            {s.inbox
+              .filter((i) => i.why)
+              .map((i) => (
+                <div className="why" key={i.id}>
+                  <b>{i.title}</b>
+                  <small>{i.why}</small>
+                </div>
+              ))}
+          </div>
+        </>
+      ) : (
+        <p className="helper">
+          {status ||
+            (s.week === 1
+              ? "The first week of a quarter is always a random draw."
+              : "The AI director didn’t pick this week, so the game used its weighted random draw.")}
+        </p>
+      )}
+    </details>
   );
 }
 

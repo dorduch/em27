@@ -7,12 +7,17 @@ function isGameState(v: unknown): v is GameState {
   return !!s && s.version === 1 && Array.isArray(s.engineers) && Array.isArray(s.inbox) && typeof s.week === "number";
 }
 
+/** Fill fields added after a save was written, so older saves keep loading. */
+function upgrade(s: GameState): GameState {
+  return { ...s, directorPlan: s.directorPlan ?? null, inboxSource: s.inboxSource ?? { by: "random" } };
+}
+
 export function loadSave(): GameState | null {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return isGameState(parsed) ? parsed : null;
+    return isGameState(parsed) ? upgrade(parsed) : null;
   } catch {
     return null;
   }
@@ -43,7 +48,7 @@ export function exportSave(s: GameState): string {
 export function importSave(text: string): GameState | null {
   try {
     const parsed = JSON.parse(decodeURIComponent(escape(atob(text.trim()))));
-    return isGameState(parsed) ? parsed : null;
+    return isGameState(parsed) ? upgrade(parsed) : null;
   } catch {
     return null;
   }

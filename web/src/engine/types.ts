@@ -130,6 +130,17 @@ export interface InboxItem {
   ignoreCause: string;
   subjectId?: string;
   factId?: string;
+  why?: string; // the AI director's reason for picking this demand
+}
+
+/** The AI director's choice of next week's demands. Picks are candidate ids from candidatePool(). */
+export interface DirectorPlan {
+  quarter: number;
+  week: number;
+  picks: string[];
+  requiredId: string | null;
+  rationale: Record<string, string>;
+  arcNote: string;
 }
 
 export interface Plan {
@@ -236,6 +247,8 @@ export interface GameState {
   plan: Plan;
   capacity: number; // this week's slot budget
   recentTypes: string[]; // anti-repeat window
+  directorPlan: DirectorPlan | null; // next week's picks, if the AI director answered in time
+  inboxSource: { by: "director" | "random"; arcNote?: string }; // who chose this week's demands
   pendingPostmortem: { role: StakeholderRole; hit: number } | null; // Stripe: last week's incident awaiting review
   incidentMultiplier: number; // Stripe: grows when reviews are skipped
   departuresThisQuarter: number;

@@ -10,10 +10,11 @@ import {
   leverageOffer,
   startNewJob,
 } from "@/engine/career";
+import { applyDirectorPlan, directorBrief } from "@/engine/director";
 import { undecided } from "@/engine/plan";
 import { advanceFromBackPage, finishCheckin, finishFriday, resolveWeek } from "@/engine/resolve";
 import { newGame } from "@/engine/setup";
-import type { CompanyId, GameState } from "@/engine/types";
+import type { CompanyId, DirectorPlan, GameState } from "@/engine/types";
 import {
   AssignScreen,
   CareerScreen,
@@ -62,8 +63,12 @@ export default function Game() {
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const mainRef = useRef<HTMLElement>(null);
 
+  // Latest state for async callbacks (the director answers after a delay).
+  const gameRef = useRef<GameState | null>(null);
+
   // Every state change is saved immediately.
   const setGame = useCallback((s: GameState) => {
+    gameRef.current = s;
     setGameState(s);
     setStorageOK(writeSave(s));
   }, []);
@@ -80,6 +85,42 @@ export default function Game() {
     if (v.name === "event") mainRef.current?.focus({ preventScroll: true });
   }, []);
 
+  // Why the last director request did or didn't shape the inbox (shown in the Week debug panel).
+  const [directorStatus, setDirectorStatus] = useState("");
+
+  /** Ask the AI director for next week's demands while Friday plays. Never blocks the game. */
+  const askDirector = useCallback(async (s: GameState) => {
+    const brief = directorBrief(s);
+    if (!brief) return;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12_000);
+    try {
+      const res = await fetch("/api/director", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(brief),
+        signal: ctrl.signal,
+      });
+      const body = await res.json();
+      if (!res.ok || !body.plan) {
+        setDirectorStatus(`Random draw: ${body.reason ?? `director returned ${res.status}`}.`);
+        return;
+      }
+      // Only apply to the same week, and only before Monday's inbox exists.
+      const current = gameRef.current;
+      const result = current && current.quarter === s.quarter && current.week === s.week ? applyDirectorPlan(current, body.plan as DirectorPlan) : null;
+      if (result?.accepted) {
+        setGame(result.state);
+        setDirectorStatus("");
+      } else {
+        setDirectorStatus("Random draw: the director's picks didn't pass validation, or arrived after Monday.");
+      }
+    } catch {
+      setDirectorStatus("Random draw: the director didn't answer in time.");
+    } finally {
+      clearTimeout(timer);
+    }
+  }, [setGame]);
 
   // Phase changes always start at the top of the page.
   const phase = game?.phase;
@@ -170,7 +211,7 @@ export default function Game() {
           ) : view.name === "packet" ? (
             <PacketScreen {...props} />
           ) : (
-            <WeekScreen {...props} />
+            <WeekScreen {...props} directorStatus={directorStatus} />
           );
         break;
       }
@@ -260,7 +301,9 @@ export default function Game() {
       );
       return;
     }
-    setGame(resolveWeek(game));
+    const resolved = resolveWeek(game);
+    setGame(resolved);
+    void askDirector(resolved);
   };
 
   return (

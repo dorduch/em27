@@ -11,7 +11,7 @@ import type {
   Stakeholder,
   Trait,
 } from "./types";
-import { buildInbox } from "./inbox";
+import { fillInbox } from "./inbox";
 
 export const TEAM_SIZE: Record<Exclude<Level, "Director">, number> = { EM: 6, "Senior EM": 8 };
 export const BASE_SLOTS: Record<Exclude<Level, "Director">, number> = { EM: 8, "Senior EM": 9 };
@@ -136,6 +136,8 @@ export function newGame(company: CompanyId, seed: number): GameState {
     plan: { choices: {}, oneOnOnes: [], focus: false, spend: [], oncallId: oncall.id },
     capacity: BASE_SLOTS.EM,
     recentTypes: [],
+    directorPlan: null,
+    inboxSource: { by: "random" },
     pendingPostmortem: null,
     incidentMultiplier: 1,
     departuresThisQuarter: 0,
@@ -148,6 +150,6 @@ export function newGame(company: CompanyId, seed: number): GameState {
     stats: { projectsShipped: 0, incidents: 0, promisesKept: 0, promisesBroken: 0, departed: [] },
     nextId: 100,
   };
-  s.inbox = buildInbox(s);
+  fillInbox(s);
   return s;
 }

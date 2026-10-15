@@ -2,7 +2,7 @@
 
 import { COMPANIES, COMPANY_IDS } from "@/content/companies";
 import { STAKEHOLDER_POOL } from "@/content/people";
-import { buildInbox } from "./inbox";
+import { fillInbox } from "./inbox";
 import { capacityFor, produce } from "./plan";
 import { REVIEW_REPUTATION, isStrong } from "./review";
 import { makeRng } from "./rng";
@@ -50,7 +50,7 @@ export function newQuarter(s: GameState): GameState {
     d.capacity = capacityFor(d.level, d.stress);
     d.plan = { choices: {}, oneOnOnes: [], focus: false, spend: [], oncallId: d.plan.oncallId && d.engineers.some((e) => e.id === d.plan.oncallId) ? d.plan.oncallId : d.engineers[0]?.id ?? null };
     d.recentTypes = [];
-    d.inbox = buildInbox(d);
+    fillInbox(d);
   });
 }
 

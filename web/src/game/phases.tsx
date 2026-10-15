@@ -616,12 +616,12 @@ export function TitleScreen({
   const [picking, setPicking] = useState(false);
   return (
     <>
-      <div className="title-art">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/app-icon.svg" alt="Eight calendar blocks, one overbooked" />
+      <div className="title-art title-logo">
         <span className="eyebrow">SEASON 2027</span>
-        <h1>EM27</h1>
-        <h2>ENGINEERING MANAGER</h2>
+        <h1>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-wordmark.png" alt="EM27 Engineering Manager" width={900} height={229} />
+        </h1>
       </div>
       <p className="title-tagline">“Got a quick minute?”</p>
       {!picking ? (
