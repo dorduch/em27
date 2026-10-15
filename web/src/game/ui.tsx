@@ -51,7 +51,19 @@ export function Rich({ text }: { text: string }) {
   return <>{out}</>;
 }
 
-export function Header({ s, title, edition, onTheme }: { s: GameState | null; title?: string; edition?: string; onTheme: () => void }) {
+export function Header({
+  s,
+  title,
+  edition,
+  onTheme,
+  bar = true,
+}: {
+  s: GameState | null;
+  title?: string;
+  edition?: string;
+  onTheme: () => void;
+  bar?: boolean; // the red EM27 title bar; the title screen has its own hero instead
+}) {
   return (
     <>
       <div className="window-caption">
@@ -60,17 +72,19 @@ export function Header({ s, title, edition, onTheme }: { s: GameState | null; ti
           ◐ ▱ □ ×
         </button>
       </div>
-      <header className="topbar">
-        <div className="brand">
-          {title ?? "EM27"}
-          <span className="edition">{edition ?? "ENGINEERING MANAGER"}</span>
-        </div>
-        {s && (
-          <div className="company">
-            <Badge company={s.company} /> {s.company}
+      {bar && (
+        <header className="topbar">
+          <div className="brand">
+            {title ?? "EM27"}
+            <span className="edition">{edition ?? "ENGINEERING MANAGER"}</span>
           </div>
-        )}
-      </header>
+          {s && (
+            <div className="company">
+              <Badge company={s.company} /> {s.company}
+            </div>
+          )}
+        </header>
+      )}
       {s && s.phase !== "recap" && (
         <div className="season">
           <span>

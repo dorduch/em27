@@ -613,7 +613,7 @@ export function TitleScreen({
   onHowTo: () => void;
 }) {
   const [company, setCompany] = useState<CompanyId>("Vercel");
-  const [confirm, setConfirm] = useState(false);
+  const [picking, setPicking] = useState(false);
   return (
     <>
       <div className="title-art">
@@ -623,55 +623,52 @@ export function TitleScreen({
         <h1>EM27</h1>
         <h2>ENGINEERING MANAGER</h2>
       </div>
-      <p className="title-tagline">
-        Six engineers.
-        <br />
-        Eight slots.
-        <br />
-        “Got a quick minute?”
-      </p>
-      {saved && (
-        <Btn kind="primary" onClick={onResume}>
-          Continue · {saved.company} · Q{saved.quarter} week {saved.week}
-        </Btn>
-      )}
-      <p className="subtitle">Pick your company. Survive the calendar.</p>
-      <div className="section-head">
-        <span>CHOOSE YOUR DUGOUT</span>
-      </div>
-      {COMPANY_IDS.map((c) => (
-        <button type="button" key={c} className={`company-option ${company === c ? "selected" : ""}`} aria-pressed={company === c} onClick={() => setCompany(c)}>
-          <Badge company={c} />
-          <span>
-            <b>{c}</b>
-            <small>
-              {COMPANIES[c].tier} · {COMPANIES[c].tagline}
-            </small>
-          </span>
-          <span>{company === c ? "●" : "○"}</span>
-        </button>
-      ))}
-      <p className="helper">{COMPANIES[company].mechanic}</p>
-      {saved && !confirm ? (
-        <Btn onClick={() => setConfirm(true)}>Start a new career…</Btn>
-      ) : saved && confirm ? (
-        <div className="notice danger">
-          <b>Replace your saved career?</b>
-          <p>
-            {saved.company} · Q{saved.quarter} week {saved.week} will be overwritten.
-          </p>
-          <Btn kind="primary" onClick={() => onStart(company)}>
-            Yes, start at {company}
+      <p className="title-tagline">“Got a quick minute?”</p>
+      {!picking ? (
+        <>
+          {saved && (
+            <Btn kind="primary" onClick={onResume}>
+              Continue · {saved.company} · Q{saved.quarter} week {saved.week}
+            </Btn>
+          )}
+          <Btn kind={saved ? "secondary" : "primary"} onClick={() => setPicking(true)}>
+            Start a new career →
           </Btn>
-          <Btn onClick={() => setConfirm(false)}>Keep my save</Btn>
-        </div>
+          <Btn onClick={onHowTo}>How to play</Btn>
+          <Btn onClick={onTheme}>Switch light / dark theme ◐</Btn>
+        </>
       ) : (
-        <Btn kind="primary" onClick={() => onStart(company)}>
-          Start a career →
-        </Btn>
+        <>
+          <div className="section-head">
+            <span>CHOOSE YOUR DUGOUT</span>
+          </div>
+          {COMPANY_IDS.map((c) => (
+            <button type="button" key={c} className={`company-option ${company === c ? "selected" : ""}`} aria-pressed={company === c} onClick={() => setCompany(c)}>
+              <Badge company={c} />
+              <span>
+                <b>{c}</b>
+                <small>
+                  {COMPANIES[c].tier} · {COMPANIES[c].tagline}
+                </small>
+              </span>
+              <span>{company === c ? "●" : "○"}</span>
+            </button>
+          ))}
+          <p className="helper">{COMPANIES[company].mechanic}</p>
+          {saved && (
+            <div className="notice danger">
+              <b>This replaces your saved career.</b>
+              <p>
+                {saved.company} · Q{saved.quarter} week {saved.week} will be overwritten.
+              </p>
+            </div>
+          )}
+          <Btn kind="primary" onClick={() => onStart(company)}>
+            Start at {company} →
+          </Btn>
+          <Btn onClick={() => setPicking(false)}>Cancel</Btn>
+        </>
       )}
-      <Btn onClick={onHowTo}>How to play</Btn>
-      <Btn onClick={onTheme}>Switch light / dark theme ◐</Btn>
       <p className="disclaimer">
         Parody. Not affiliated with or endorsed by any company named. All characters and situations are fictional.
         <br />

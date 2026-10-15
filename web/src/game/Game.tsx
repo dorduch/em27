@@ -266,7 +266,7 @@ export default function Game() {
   return (
     <div className="device">
       <div className="app" id="app">
-        <Header s={onTitle ? null : game} title={headerTitle} edition={headerEdition} onTheme={toggleTheme} />
+        <Header s={onTitle ? null : game} title={headerTitle} edition={headerEdition} onTheme={toggleTheme} bar={!(onTitle && !intro)} />
         {planning && game && <Calendar s={game} onAgenda={() => (view.name === "week" ? document.getElementById("agenda")?.scrollIntoView({ block: "center", behavior: "smooth" }) : go({ name: "week" }))} />}
         <main id="main" tabIndex={-1} ref={mainRef}>
           {!storageOK && (
