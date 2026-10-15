@@ -14,7 +14,7 @@ const FIREBASE_CONFIG = {
   storageBucket: "em27-game.firebasestorage.app",
   messagingSenderId: "480776165801",
   appId: "1:480776165801:web:b8d6412506035c31694cb8",
-  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID ?? "",
+  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || "G-2GMQGVY3LZ",
 };
 
 const enabled = !!FIREBASE_CONFIG.measurementId && process.env.NODE_ENV === "production";
