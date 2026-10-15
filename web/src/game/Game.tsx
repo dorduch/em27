@@ -61,6 +61,8 @@ export default function Game() {
   const [storageOK, setStorageOK] = useState(true);
   // The how-to-play screens: on a first career, replayed from Office, or opened from the title.
   const [intro, setIntro] = useState<null | "first" | "replay" | "title">(null);
+  // Title screen: whether the company picker is open (the tutorial opens it when finished from the title).
+  const [pickerOpen, setPickerOpen] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const mainRef = useRef<HTMLElement>(null);
 
@@ -164,6 +166,7 @@ export default function Game() {
         onDone={() => {
           if (intro === "first") toast("Your team is ready · start with the red demand");
           track("tutorial_done", { mode: intro });
+          if (intro === "title") setPickerOpen(true);
           setIntro(null);
         }}
       />
@@ -172,6 +175,8 @@ export default function Game() {
     content = (
       <TitleScreen
         saved={saved}
+        picking={pickerOpen}
+        setPicking={setPickerOpen}
         onHowTo={() => setIntro("title")}
         onTheme={toggleTheme}
         onStart={start}
@@ -335,8 +340,14 @@ export default function Game() {
   return (
     <div className="device">
       <div className="app" id="app">
-        <Header s={onTitle ? null : game} title={headerTitle} edition={headerEdition} onTheme={toggleTheme} bar={!(onTitle && !intro)} />
+        <Header s={onTitle ? null : game} title={headerTitle} edition={headerEdition} bar={!(onTitle && !intro)} />
         {planning && game && <Calendar s={game} onAgenda={() => (view.name === "week" ? document.getElementById("agenda")?.scrollIntoView({ block: "center", behavior: "smooth" }) : go({ name: "week" }))} />}
+        {/* Feedback appears just under the calendar (or the header), never over the controls it reports on. */}
+        <div className="toast-anchor">
+          <div id="toast" role="status" aria-live="polite" className={toastMsg ? "show" : ""}>
+            {toastMsg}
+          </div>
+        </div>
         <main id="main" tabIndex={-1} ref={mainRef}>
           {!storageOK && (
             <div className="notice danger">
@@ -354,9 +365,6 @@ export default function Game() {
             onContinue={onContinue}
           />
         )}
-      </div>
-      <div id="toast" role="status" aria-live="polite" className={toastMsg ? "show" : ""}>
-        {toastMsg}
       </div>
     </div>
   );

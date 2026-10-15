@@ -61,7 +61,7 @@ export function deliveryScore(s: GameState): number {
 export function teamScore(s: GameState): number {
   const morale = avg(s.engineers.map((e) => e.attrs.morale));
   const energy = avg(s.engineers.map((e) => e.attrs.energy));
-  return Math.max(0, Math.min(100, Math.round((morale / 20) * 45 + (energy / 20) * 35 + 20 - 8 * s.departuresThisQuarter)));
+  return Math.max(0, Math.min(100, Math.round((morale / 20) * 45 + (energy / 20) * 35 + 20 - 5 * s.departuresThisQuarter)));
 }
 
 export function trustScore(s: GameState): number {

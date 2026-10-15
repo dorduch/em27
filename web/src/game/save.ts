@@ -9,7 +9,12 @@ function isGameState(v: unknown): v is GameState {
 
 /** Fill fields added after a save was written, so older saves keep loading. */
 function upgrade(s: GameState): GameState {
-  return { ...s, directorPlan: s.directorPlan ?? null, inboxSource: s.inboxSource ?? { by: "random" } };
+  return {
+    ...s,
+    directorPlan: s.directorPlan ?? null,
+    inboxSource: s.inboxSource ?? { by: "random" },
+    quarterEvents: s.quarterEvents ?? s.inbox.map((i) => i.type),
+  };
 }
 
 export function loadSave(): GameState | null {

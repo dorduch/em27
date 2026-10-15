@@ -46,7 +46,11 @@ export function newQuarter(s: GameState): GameState {
       e.projectId = null;
     }
     autoAssign(d.engineers, d.projects);
-    d.facts = d.facts.filter((f) => f.status === "open" && f.quarter === d.quarter);
+    // Promises still open at quarter end (made too late to come due) carry over to week 2.
+    d.facts = d.facts
+      .filter((f) => f.status === "open" && d.engineers.some((e) => e.id === f.subjectId))
+      .map((f) => ({ ...f, quarter: d.quarter, dueWeek: 2 }));
+    d.quarterEvents = [];
     d.capacity = capacityFor(d.level, d.stress);
     d.plan = { choices: {}, oneOnOnes: [], focus: false, spend: [], oncallId: d.plan.oncallId && d.engineers.some((e) => e.id === d.plan.oncallId) ? d.plan.oncallId : d.engineers[0]?.id ?? null };
     d.recentTypes = [];
@@ -182,6 +186,8 @@ export function startNewJob(s: GameState): GameState {
     d.partialStreak = 0;
     d.incidentMultiplier = 1;
     d.pendingPostmortem = null;
+    // Promises made to the squad you leave behind lapse; they count as broken.
+    d.stats.promisesBroken += d.facts.filter((f) => f.status === "open").length;
     d.facts = [];
     d.plan.oncallId = null;
     d.history.push({ quarter: d.quarter, company: d.company, level, grade: "New role" });

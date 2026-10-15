@@ -136,6 +136,7 @@ export function newGame(company: CompanyId, seed: number): GameState {
     plan: { choices: {}, oneOnOnes: [], focus: false, spend: [], oncallId: oncall.id },
     capacity: BASE_SLOTS.EM,
     recentTypes: [],
+    quarterEvents: [],
     directorPlan: null,
     inboxSource: { by: "random" },
     pendingPostmortem: null,

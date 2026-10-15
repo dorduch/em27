@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { COMPANIES } from "@/content/companies";
 import type { CompanyId } from "@/engine/types";
-import { Btn } from "./ui";
+import { Btn, HintChips } from "./ui";
 
 export const TUTORIAL_KEY = "em27.tutorial.seen";
 
@@ -85,7 +85,7 @@ function steps(company: CompanyId | null): Step[] {
               <small>One red demand a week can’t be ignored.</small>
             </div>
           </div>
-          <p className="helper">Every demand needs a decision before Friday. You can go over 8 slots, but it adds Stress, and high Stress shrinks next week’s calendar.</p>
+          <p className="helper">Every demand needs a decision before Friday, and Ignore counts as one: it’s free, but the demand still plays out. You can go over 8 slots, but it adds Stress, and high Stress shrinks next week’s calendar.</p>
         </>
       ),
     },
@@ -100,9 +100,9 @@ function steps(company: CompanyId | null): Step[] {
               <span>Commit to the promo, in writing</span>
               <span className="cost">1 slot</span>
             </span>
-            <span className="intent-hints">Morale ↑ · Promise due wk 10</span>
+            <HintChips hints="Morale ↑ · Promise due wk 10" />
           </div>
-          <p className="helper">Hints show direction, not exact numbers. You can change your mind until you press Continue. Promises are remembered, and they come back when they’re due.</p>
+          <p className="helper">Hints show direction, not exact numbers: green helps you, red hurts. You can change your mind until you press Continue. Promises are remembered, and they come back when they’re due.</p>
         </>
       ),
     },
@@ -121,7 +121,8 @@ function steps(company: CompanyId | null): Step[] {
               <b style={{ width: "45%" }} />
               <span className="deadline" style={{ left: "40%" }} />
             </div>
-            <p className="mini">45 / 100 POINTS · DUE WEEK 6 · ~19/WK</p>
+            <p className="forecast good">On track: finishes wk 5, due wk 6</p>
+            <p className="mini">45 / 100 POINTS · ~19/WK</p>
           </div>
           <div className="panel">
             <div className="why">
@@ -211,7 +212,7 @@ export function Tutorial({ company, finishLabel, onDone }: { company: CompanyId 
       </div>
       <h1 style={{ marginTop: 8 }}>{step.title}</h1>
       {step.body}
-      <div style={{ marginTop: 16 }}>
+      <div className="sticky-actions">
         <Btn
           kind="primary"
           onClick={() => {
@@ -223,17 +224,21 @@ export function Tutorial({ company, finishLabel, onDone }: { company: CompanyId 
         >
           {last ? finishLabel : "Next →"}
         </Btn>
-        {i > 0 && <Btn onClick={() => setI(i - 1)}>← Back</Btn>}
-        {!last && (
+        {/* Fixed two-button row so Next never moves between pages. */}
+        <div className="tutorial-nav">
+          <Btn disabled={i === 0} onClick={() => setI(i - 1)}>
+            ← Back
+          </Btn>
           <Btn
+            disabled={last}
             onClick={() => {
               markTutorialSeen();
               onDone();
             }}
           >
-            Skip the tutorial
+            Skip
           </Btn>
-        )}
+        </div>
       </div>
     </>
   );

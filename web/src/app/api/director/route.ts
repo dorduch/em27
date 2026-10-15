@@ -9,7 +9,7 @@ import type { DirectorBrief } from "@/engine/director";
 
 const MODEL = process.env.DIRECTOR_MODEL ?? "claude-haiku-5-5";
 const MAX_BODY = 24_000;
-const ID_PATTERN = /^[a-z_]+:\d$/;
+const ID_PATTERN = /^[a-z0-9_]+:\d$/;
 
 // Stable, cacheable instructions. Keep volatile data out of this string.
 const SYSTEM = `You are the director of EM27, a Championship Manager-style game where the player is an engineering manager.

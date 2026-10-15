@@ -203,6 +203,8 @@ class Resolver {
             createdWeek: this.d.week,
             dueWeek: Math.min(12, this.d.week + ef.dueIn),
             status: "open",
+            payload: ef.payload,
+            payloadHint: ef.payloadHint,
           });
           break;
         }
@@ -245,9 +247,9 @@ class Resolver {
 }
 
 const GOOD_HEADLINES = [
-  "A release.<br>A runbook.<br>A small victory.",
-  "Shipped. Nobody cried.<br>Mostly.",
+  "A quiet week.<br>Suspiciously quiet.",
   "The plan met production.<br>The plan won.",
+  "Small wins.<br>They still count.",
 ];
 const BAD_HEADLINES = [
   "Everything was on fire.<br>Including the roadmap.",
@@ -263,16 +265,33 @@ export function resolveWeek(s: GameState): GameState {
     const used = planCost(s);
     const cap = s.capacity;
     let keynote: WeekResult["keynote"];
+    const departedBefore = d.stats.departed.length;
     r.line("The plan is locked. The calendar has opinions.", `Week ${d.week} · ${used}/${cap} slots booked`);
 
     // 1. Inbox decisions. Unanswered optional items resolve as ignored.
+    // Plain decisions are folded into one line so Friday gets to the outcomes faster.
+    const calls: string[] = [];
+    const slid: string[] = [];
     for (const item of s.inbox) {
       const choice = s.plan.choices[item.id] ?? "ignore";
       if (item.type === "postmortem") {
         const pm = d.pendingPostmortem;
-        if (pm && choice !== "ignore") {
+        const oncallEng = d.plan.oncallId ? r.eng(d.plan.oncallId) : undefined;
+        if (pm && choice === "present") {
+          r.trust(pm.role, pm.hit, "Postmortem presented at the incident review");
+          r.trust("skip", 2, "Owned the incident in the room");
+          r.line("You present the postmortem yourself. The room relaxes.", "Incident review → Trust restored", "good");
+        } else if (pm && choice === "write") {
           r.trust(pm.role, Math.ceil(pm.hit / 2), "Postmortem halved the incident hit");
           r.line("The postmortem lands. Clear owners, clear fixes.", "Incident review → Trust partly restored", "good");
+        } else if (pm && choice === "delegate" && oncallEng) {
+          r.attr(oncallEng, "energy", -2, "Wrote the postmortem");
+          if (rng.chance(oncallEng.attrs.communication / 20)) {
+            r.trust(pm.role, Math.ceil(pm.hit / 2), `${first(oncallEng)}’s postmortem landed`);
+            r.line(`${first(oncallEng)}’s postmortem is clear and blameless.`, "Communication → Trust partly restored", "good");
+          } else {
+            r.line(`${first(oncallEng)}’s postmortem reads like a stack trace. Nobody is reassured.`, "Communication too low → no Trust back", "bad");
+          }
         } else {
           d.incidentMultiplier += 0.5;
           r.line("Nobody wrote the postmortem. The next incident will cost more.", "Skipped review → incident cost ↑", "bad");
@@ -282,14 +301,17 @@ export function resolveWeek(s: GameState): GameState {
       }
       if (choice === "ignore") {
         const notes = r.apply(item.ignoreEffects, item.ignoreCause);
-        const bad = item.ignoreEffects.length > 0;
-        r.line(`${item.ignoreCause}${notes.length ? ` (${notes.join(", ")})` : ""}.`, "Ignored demand → resolved", bad ? "bad" : undefined);
+        if (!item.ignoreEffects.length && !notes.length) slid.push(item.ignoreCause);
+        else r.line(`${item.ignoreCause}${notes.length ? ` (${notes.join(", ")})` : ""}.`, "Ignored demand → resolved", item.ignoreEffects.length ? "bad" : undefined);
       } else {
         const intent = item.intents.find((i) => i.id === choice)!;
         const notes = r.apply(intent.effects, intent.cause);
-        r.line(`${intent.cause}${notes.length ? ` (${notes.join(", ")})` : ""}.`, `${item.from} → your response`);
+        if (notes.length) r.line(`${intent.cause} (${notes.join(", ")}).`, `${item.from} → your response`);
+        else calls.push(intent.cause);
       }
     }
+    if (calls.length) r.line(`Your calls: ${calls.join("; ")}.`, "Your decisions → applied");
+    if (slid.length) r.line(`Let slide: ${slid.join("; ")}.`, "Ignored, no immediate cost");
 
     // 2. 1:1s: morale and scouting.
     for (const id of s.plan.oneOnOnes) {
@@ -317,6 +339,8 @@ export function resolveWeek(s: GameState): GameState {
     }
 
     // 3. Projects.
+    const startActive = d.projects.filter((p) => p.status === "active").map((p) => p.id);
+    const gains: Record<string, { gain: number; team: number }> = {};
     const luck = rng.int(-2, 2);
     const activeWithTeam = d.projects.filter((p) => p.status === "active" && d.engineers.some((e) => e.projectId === p.id));
     const luckProject = activeWithTeam.length ? rng.pick(activeWithTeam) : null;
@@ -326,6 +350,7 @@ export function resolveWeek(s: GameState): GameState {
       if (p === luckProject) gain = Math.max(0, gain + luck);
       const before = p.progress;
       p.progress = Math.min(p.scope, p.progress + gain);
+      gains[p.id] = { gain: p.progress - before, team: team.length };
       if (team.length) {
         r.cause(`${p.name} progress`, p.progress - before, `${team.map(first).join(" + ")} on the work`);
         const onTrack = p.progress >= Math.round((p.scope * Math.min(1, (d.week - p.startWeek + 1) / (p.dueWeek - p.startWeek + 1))));
@@ -343,6 +368,8 @@ export function resolveWeek(s: GameState): GameState {
     }
 
     // 4. Ships and deadlines.
+    const shippedNames: string[] = [];
+    const missedNames: string[] = [];
     for (const p of d.projects.filter((x) => x.status === "active")) {
       if (p.progress >= p.scope) {
         const late = d.week > p.dueWeek;
@@ -356,12 +383,14 @@ export function resolveWeek(s: GameState): GameState {
           e.projectId = null;
           r.attr(e, "morale", 2, `${p.name} shipped`);
         }
+        shippedNames.push(p.name);
         r.line(`${p.name} ships${late ? ", late" : ""}. <b class="good">Released.</b>`, "Delivery → Trust and Reputation", "good");
       } else if (d.week >= p.dueWeek) {
         p.status = "missed";
         r.trust(p.owner, -8, `${p.name} missed its date`);
         r.meter("reputation", -3, `${p.name} missed its date`);
         for (const e of d.engineers.filter((x) => x.projectId === p.id)) e.projectId = null;
+        missedNames.push(p.name);
         r.line(`${p.name} misses week ${p.dueWeek}. <b class="bad">Deadline missed.</b>`, "Delivery → Trust", "bad");
       }
     }
@@ -381,6 +410,7 @@ export function resolveWeek(s: GameState): GameState {
     }
 
     // 5. On-call and incidents.
+    let escalated = false;
     const oncall = d.plan.oncallId ? r.eng(d.plan.oncallId) : undefined;
     if (oncall) r.attr(oncall, "energy", -1, "On call this week");
     const pIncident = COMPANIES[d.company].incidentBase + d.techDebt / 250 + d.oncallLoad / 400;
@@ -402,6 +432,7 @@ export function resolveWeek(s: GameState): GameState {
         r.trust("skip", -hit, stripe ? "Incident (double Trust cost at this company)" : "Customer-facing incident");
         if (oncall) r.attr(oncall, "energy", -3, "Three-hour incident");
         if (stripe) d.pendingPostmortem = { role: "skip", hit };
+        escalated = true;
         r.line(`…it escalates to you. Rollback takes three hours. <b class="bad">Tech Debt +3.</b>`, oncall ? "On-call mismatch → longer recovery" : "No one on call → long recovery", "bad");
       }
     } else {
@@ -439,6 +470,34 @@ export function resolveWeek(s: GameState): GameState {
     const goodN = r.lines.filter((l) => l.tone === "good").length;
     const badN = r.lines.filter((l) => l.tone === "bad").length;
     const good = goodN >= badN;
+    const leftThisWeek = d.stats.departed.slice(departedBefore);
+    // The headline reports what actually happened, most newsworthy first.
+    const headline =
+      keynote === "shipped"
+        ? `On stage, on time.<br>${flagship!.name} is live.`
+        : keynote === "missed"
+          ? "An empty stage.<br>A very full Slack."
+          : leftThisWeek.length
+            ? `${leftThisWeek[0]} resigns.<br>The calendar invite says “Catch up :)”.`
+            : shippedNames.length
+              ? `${shippedNames[0]} ships.<br>${escalated ? "The pager had notes." : "Nobody cried. Mostly."}`
+              : missedNames.length
+                ? `${missedNames[0]} misses its date.<br>The retro is already booked.`
+                : escalated
+                  ? "The pager won this week.<br>Rollback by teatime."
+                  : rng.pick(good ? GOOD_HEADLINES : BAD_HEADLINES);
+    const projects = d.projects
+      .filter((p) => startActive.includes(p.id))
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        gain: gains[p.id]?.gain ?? 0,
+        team: gains[p.id]?.team ?? 0,
+        progress: p.progress,
+        scope: p.scope,
+        dueWeek: p.dueWeek,
+        status: p.status,
+      }));
     d.lastWeek = {
       quarter: d.quarter,
       week: d.week,
@@ -447,12 +506,13 @@ export function resolveWeek(s: GameState): GameState {
       lines: r.lines,
       causes: r.causes.filter((c) => c.delta !== 0),
       luck,
-      headline: rng.pick(good ? GOOD_HEADLINES : BAD_HEADLINES),
+      headline,
       recap: good
         ? `${goodN} things went right this week, ${badN} went wrong. For one Friday, that counts.`
         : `${badN} things went wrong this week. Someone has already scheduled a retro about the retro.`,
       good,
       keynote,
+      projects,
     };
     d.phase = "friday";
   });

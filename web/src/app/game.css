@@ -2279,3 +2279,260 @@ body {
   width: 100%;
   height: auto;
 }
+
+/* ---------------------------------------------------------------
+   Review fixes (UI review, Oct 2026)
+   --------------------------------------------------------------- */
+
+/* Compact header: ~120px more room for content on a phone. */
+.topbar {
+  min-height: 0;
+  padding: 4px 9px;
+  margin-top: 4px;
+}
+.brand {
+  font-size: 18px;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+}
+.edition {
+  margin-top: 0;
+  font-size: 9px;
+}
+.topbar .company {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.season {
+  padding: 5px 8px;
+  font-size: 11px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.season-co {
+  color: #e5eb87;
+  font-weight: 400;
+  text-align: right;
+}
+.season-co b {
+  color: #e7e637;
+}
+.calendar {
+  padding: 6px 9px;
+}
+.cal-head {
+  margin-bottom: 4px;
+}
+.calendar .slots {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 0;
+  margin: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+}
+.calendar .slots:focus-visible {
+  outline: 2px solid var(--accent);
+}
+.cal-value.bad {
+  color: #ffac91;
+}
+
+/* 1–20 attribute bands: three clearly different hues, not two yellows. */
+.num.good {
+  color: #b9e65a;
+}
+.num.warn {
+  color: #ffb347;
+}
+.num.bad {
+  color: #ff9a84;
+}
+
+/* Hint chips coloured by whether the effect helps or hurts the player. */
+.hint-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.hint {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  font: 11px/1.5 Tahoma, Arial, sans-serif;
+  color: var(--ink);
+}
+.hint.good {
+  color: #d4f59a;
+  background: #263d1e;
+  border-color: #6f9441;
+}
+.hint.bad {
+  color: #ffc1b2;
+  background: #43201b;
+  border-color: #9a4a3a;
+}
+.hint.neutral {
+  color: var(--muted);
+}
+
+/* Action bars stay reachable on long screens (Friday, back page, tutorial). */
+.sticky-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  margin: 16px -16px 0;
+  padding: 8px 16px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  border-top: 1px solid var(--line);
+}
+.tutorial-nav {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.tutorial-nav button {
+  margin-top: 8px;
+}
+
+/* Toast sits under the calendar (or header), never over Continue or the tabs. */
+.toast-anchor {
+  position: relative;
+  height: 0;
+  z-index: 30;
+}
+#toast {
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  right: 8px;
+  bottom: auto;
+  transform: none;
+  max-width: none;
+}
+
+/* Forward-looking project status. */
+.forecast {
+  font: bold 12px/1.4 Tahoma, Arial, sans-serif;
+  margin: 2px 0 6px;
+}
+.forecast.good {
+  color: #b9e65a;
+}
+.forecast.warn {
+  color: #ffb347;
+}
+.forecast.bad {
+  color: #ff9a84;
+}
+.project-meta {
+  font: 12px Tahoma, Arial, sans-serif;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.staff-row {
+  margin: 0;
+  border-width: 0 0 1px;
+  box-shadow: none;
+}
+.staff-stats {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  font: 12px Tahoma, Arial, sans-serif;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.staff-stats .num {
+  font-size: 13px;
+  margin-right: 6px;
+}
+.staff-preview {
+  display: block;
+  margin-top: 4px;
+  font: 12px/1.4 Tahoma, Arial, sans-serif;
+}
+.staff-preview.good {
+  color: #b9e65a;
+}
+.staff-preview.bad {
+  color: #ff9a84;
+}
+
+/* Monday context. */
+.since-friday,
+.context-line {
+  font: 12px/1.45 Tahoma, Arial, sans-serif;
+  margin: 8px 0;
+  padding: 6px 8px;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
+  color: var(--ink);
+}
+.notice-button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Readability: nothing important below 11–12px. */
+.person small {
+  font-size: 11px;
+}
+.mini {
+  font-size: 11px;
+}
+.row-tags {
+  font-size: 11px;
+}
+.energy {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+.energy i {
+  width: 24px;
+}
+.profile-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+  padding-bottom: 4px;
+}
+
+/* Light theme: opaque, darker rows so white and yellow text clears ~4.5:1. */
+[data-theme="light"] {
+  --paper: oklch(38% 0.012 130);
+  --panel: oklch(42% 0.012 130);
+}
+[data-theme="light"] .panel,
+[data-theme="light"] .inbox-row,
+[data-theme="light"] .calendar,
+[data-theme="light"] .intent,
+[data-theme="light"] .commentary,
+[data-theme="light"] .notice {
+  background: var(--paper);
+}
+[data-theme="light"] .inbox-row:nth-child(even) {
+  background: var(--panel);
+}
+[data-theme="light"] main > .subtitle,
+[data-theme="light"] main > .helper,
+[data-theme="light"] main > p.helper {
+  background: var(--paper);
+  padding: 6px 8px;
+}
+[data-theme="light"] .sticky-actions {
+  background: oklch(62% 0.012 125);
+}

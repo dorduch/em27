@@ -117,7 +117,8 @@ export function buildInbox(s: GameState): InboxItem[] {
     }
   }
   if (s.company === "Stripe" && s.pendingPostmortem) {
-    items.push({ id: id(), type: "postmortem", cat: "FOLLOW-UP", required: false, ...postmortemFollowUp() });
+    const oncall = s.engineers.find((e) => e.id === s.plan.oncallId);
+    items.push({ id: id(), type: "postmortem", cat: "FOLLOW-UP", required: false, ...postmortemFollowUp(oncall) });
   }
 
   const pool = candidatePool(s);
@@ -131,7 +132,7 @@ export function buildInbox(s: GameState): InboxItem[] {
     const body = c.type.build(c.ctx);
     if (s.company !== "Google") {
       // The promo packet only exists at Google; keep hints honest elsewhere.
-      for (const i of body.intents) i.hints = i.hints.replace(/ · Packet evidence|Packet evidence · /g, "");
+      for (const i of body.intents) i.hints = stripPacket(i.hints);
     }
     regular.push({
       id: "",
@@ -153,8 +154,17 @@ export function buildInbox(s: GameState): InboxItem[] {
 export function fillInbox(d: GameState): void {
   const plan = validatePlan(d, candidatePool(d), d.directorPlan);
   d.inbox = buildInbox(d);
+  d.quarterEvents = [...(d.quarterEvents ?? []), ...d.inbox.map((i) => i.type)];
   d.inboxSource = plan ? { by: "director", arcNote: plan.arcNote } : { by: "random" };
   d.directorPlan = null;
+}
+
+/** The promo packet only exists at Google; remove its hint segment elsewhere. */
+export function stripPacket(hints: string): string {
+  return hints
+    .split(" · ")
+    .filter((seg) => seg !== "Packet evidence")
+    .join(" · ");
 }
 
 export function rememberTypes(s: GameState): string[] {

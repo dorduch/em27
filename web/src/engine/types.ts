@@ -80,6 +80,8 @@ export interface Fact {
   createdWeek: number;
   dueWeek: number;
   status: "open" | "kept" | "broken";
+  payload?: Effect[];
+  payloadHint?: string;
 }
 
 export type Effect =
@@ -94,7 +96,15 @@ export type Effect =
   | { k: "progress"; project: string; d: number }
   | { k: "scope"; project: string; d: number }
   | { k: "deadline"; project: string; d: number }
-  | { k: "promise"; who: string; text: string; dueIn: number }
+  | {
+      k: "promise";
+      who: string;
+      text: string;
+      dueIn: number;
+      /** Applied when the promise is kept: what keeping it actually costs or delivers. */
+      payload?: Effect[];
+      payloadHint?: string;
+    }
   | { k: "keep"; factId: string }
   | { k: "break"; factId: string }
   | { k: "scout"; who: string; d: number }
@@ -158,6 +168,18 @@ export interface FridayLine {
   tone?: "good" | "bad";
 }
 
+/** One row per project on the back page, including projects that made no progress. */
+export interface ProjectWeek {
+  id: string;
+  name: string;
+  gain: number;
+  team: number;
+  progress: number;
+  scope: number;
+  dueWeek: number;
+  status: Project["status"];
+}
+
 export interface WeekResult {
   quarter: number;
   week: number;
@@ -170,6 +192,7 @@ export interface WeekResult {
   recap: string;
   good: boolean;
   keynote?: "shipped" | "missed";
+  projects?: ProjectWeek[]; // absent in saves from before this field existed
 }
 
 export interface QuarterRecord {
@@ -247,6 +270,7 @@ export interface GameState {
   plan: Plan;
   capacity: number; // this week's slot budget
   recentTypes: string[]; // anti-repeat window
+  quarterEvents: string[]; // event types seen this quarter (for once-per-quarter events)
   directorPlan: DirectorPlan | null; // next week's picks, if the AI director answered in time
   inboxSource: { by: "director" | "random"; arcNote?: string }; // who chose this week's demands
   pendingPostmortem: { role: StakeholderRole; hit: number } | null; // Stripe: last week's incident awaiting review

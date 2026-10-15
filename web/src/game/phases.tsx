@@ -24,6 +24,21 @@ export function FridayScreen({ s, onDone }: { s: GameState; onDone: () => void }
   }, [lines.length]);
   const done = count >= lines.length;
   const keynote = s.lastWeek?.keynote;
+  // Keep the newest line in view, unless the player has scrolled up to reread.
+  const listRef = useRef<HTMLDivElement>(null);
+  const follow = useRef(true);
+  useEffect(() => {
+    const main = document.getElementById("main");
+    if (!main) return;
+    const onScroll = () => {
+      follow.current = main.scrollTop + main.clientHeight >= main.scrollHeight - 80;
+    };
+    main.addEventListener("scroll", onScroll, { passive: true });
+    return () => main.removeEventListener("scroll", onScroll);
+  }, []);
+  useEffect(() => {
+    if (follow.current) listRef.current?.lastElementChild?.scrollIntoView({ block: "end" });
+  }, [count]);
   return (
     <>
       <span className="eyebrow">
@@ -34,7 +49,7 @@ export function FridayScreen({ s, onDone }: { s: GameState; onDone: () => void }
         <h1>{keynote === "shipped" ? "The demo is live." : keynote === "missed" ? "The demo slot is empty." : "Friday, then."}</h1>
         <p className="subtitle">The part where the plan meets production.</p>
       </div>
-      <div aria-live="polite" aria-relevant="additions">
+      <div aria-live="polite" aria-relevant="additions" ref={listRef}>
         {lines.slice(0, count).map((l, i) => (
           <div className="commentary" key={i}>
             <time>{l.time}</time>
@@ -45,7 +60,7 @@ export function FridayScreen({ s, onDone }: { s: GameState; onDone: () => void }
           </div>
         ))}
       </div>
-      <div className="friday-actions">
+      <div className="friday-actions sticky-actions">
         {done ? (
           <Btn kind="primary" onClick={onDone}>
             Read the back page →
@@ -62,9 +77,33 @@ export function FridayScreen({ s, onDone }: { s: GameState; onDone: () => void }
 
 export function BackPageScreen({ s, onNext }: { s: GameState; onNext: () => void }) {
   const w = s.lastWeek!;
-  const causes = [...w.causes].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 12);
+  const [showAll, setShowAll] = useState(false);
   const goodFor = (subject: string, d: number) => (/Tech Debt|On-call Load|Stress|scope|deadline/.test(subject) ? d < 0 : d > 0);
   const nextLabel = s.week === 5 ? "Mid-quarter check-in →" : s.week >= 12 ? "Quarterly review →" : `Monday · week ${s.week + 1} →`;
+  const projects = w.projects ?? [];
+  // Group identical causes across engineers ("Team Morale +1 (3 engineers) · Public kudos").
+  const rows: { subject: string; delta: number; why: string }[] = [];
+  const grouped = new Map<string, { attr: string; delta: number; why: string; n: number }>();
+  for (const c of w.causes) {
+    if (projects.length && c.subject.endsWith(" progress")) continue; // covered by the project rows
+    const m = c.subject.match(/^(.+)’s (Morale|Energy|Loyalty|Coding|Debugging|Communication|Ambition)$/);
+    if (m) {
+      const key = `${m[2]}|${c.delta}|${c.why}`;
+      const g = grouped.get(key);
+      if (g) g.n++;
+      else grouped.set(key, { attr: m[2], delta: c.delta, why: c.why, n: 1 });
+      if (!g) rows.push({ subject: key, delta: c.delta, why: c.why });
+    } else rows.push(c);
+  }
+  const display = rows
+    .map((r) => {
+      const g = grouped.get(r.subject);
+      if (!g) return r;
+      const one = w.causes.find((c) => c.why === g.why && c.delta === g.delta && c.subject.endsWith(`’s ${g.attr}`))!;
+      return { subject: g.n > 1 ? `${g.attr} (${g.n} engineers)` : one.subject, delta: g.delta, why: g.why };
+    })
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  const shown = showAll ? display : display.slice(0, 10);
   return (
     <div className="paper">
       <div className="masthead">The Engineering Post</div>
@@ -75,12 +114,41 @@ export function BackPageScreen({ s, onNext }: { s: GameState; onNext: () => void
         <Rich text={w.headline} />
       </h1>
       <p className="recap">{w.recap}</p>
+      {projects.length > 0 && (
+        <>
+          <div className="section-head">
+            <span>THE PROJECTS</span>
+            <span>THIS WEEK</span>
+          </div>
+          <div className="cause-list">
+            {projects.map((p) => (
+              <div className="delta" key={p.id}>
+                <b className={p.gain > 0 ? "good" : "bad"}>{p.gain > 0 ? `↑ ${p.gain}` : "0"}</b>
+                <div>
+                  <strong>
+                    {p.name} · {p.progress}/{p.scope}
+                  </strong>
+                  <small>
+                    {p.status === "shipped" || p.status === "late-shipped"
+                      ? "Shipped."
+                      : p.status === "missed"
+                        ? `Missed week ${p.dueWeek}.`
+                        : p.team
+                          ? `${p.team} ${p.team === 1 ? "person" : "people"} on it · due week ${p.dueWeek}`
+                          : `Nobody assigned · due week ${p.dueWeek}`}
+                  </small>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
       <div className="section-head">
         <span>THE NUMBERS / AND THE WHY</span>
-        <span>{w.causes.length} CHANGES</span>
+        <span>{display.length} CHANGES</span>
       </div>
       <div className="cause-list">
-        {causes.map((c, i) => {
+        {shown.map((c, i) => {
           const good = goodFor(c.subject, c.delta);
           return (
             <div className="delta" key={i}>
@@ -106,8 +174,8 @@ export function BackPageScreen({ s, onNext }: { s: GameState; onNext: () => void
           </div>
         )}
       </div>
-      {w.causes.length > causes.length && <p className="helper">Showing the 12 biggest changes. Player cards keep each engineer’s full history.</p>}
-      <div style={{ marginTop: 16 }}>
+      {display.length > shown.length && <Btn onClick={() => setShowAll(true)}>Show all {display.length} changes ↓</Btn>}
+      <div className="sticky-actions">
         <Btn kind="primary" onClick={onNext}>
           {nextLabel}
         </Btn>
@@ -605,7 +673,11 @@ export function TitleScreen({
   onResume,
   onTheme,
   onHowTo,
+  picking,
+  setPicking,
 }: {
+  picking: boolean;
+  setPicking: (v: boolean) => void;
   saved: GameState | null;
   onStart: (c: CompanyId) => void;
   onResume: () => void;
@@ -613,7 +685,6 @@ export function TitleScreen({
   onHowTo: () => void;
 }) {
   const [company, setCompany] = useState<CompanyId>("Vercel");
-  const [picking, setPicking] = useState(false);
   return (
     <>
       <div className="title-art title-logo">

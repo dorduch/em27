@@ -7,6 +7,10 @@ function smart(s: GameState): GameState {
   if (req) s = choose(s, req.id, [...req.intents].sort((a, b) => a.cost - b.cost)[0].id);
   for (const item of s.inbox) {
     if (s.plan.choices[item.id]) continue;
+    if (item.type === "promise_due" && planCost(s) + 2 <= s.capacity) {
+      s = choose(s, item.id, "deliver");
+      continue;
+    }
     const opts = [...item.intents].sort((a, b) => b.cost - a.cost).filter((i) => planCost(s) + i.cost <= s.capacity);
     if (opts.length) s = choose(s, item.id, opts[Math.floor(opts.length / 2)].id);
   }

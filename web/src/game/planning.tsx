@@ -5,6 +5,7 @@ import { COMPANIES, KEYNOTE_WEEK, PACKET_TARGET } from "@/content/companies";
 import { expectedProgress } from "@/content/events";
 import { TRAIT_LABEL } from "@/content/people";
 import { engineerOutput } from "@/engine/resolve";
+import { forecastAll, forecastLabel, forecastMove, forecastTone, type Forecast } from "@/engine/forecast";
 import {
   assign,
   blockingItem,
@@ -24,7 +25,7 @@ import {
 } from "@/engine/plan";
 import type { AttrKey, GameState, InboxItem } from "@/engine/types";
 import { exportSave, importSave } from "./save";
-import { Badge, Btn, first, initials, Meter, Num } from "./ui";
+import { Badge, Btn, first, HintChips, initials, Meter, Num } from "./ui";
 
 export type View =
   | { name: "week" }
@@ -54,11 +55,37 @@ const slots = (n: number) => `${n} slot${n === 1 ? "" : "s"}`;
 
 /* ---------------- Week ---------------- */
 
+/** One line connecting Monday to last Friday: what changed most, and why. */
+function SinceFriday({ s }: { s: GameState }) {
+  const w = s.lastWeek;
+  if (!w || w.quarter !== s.quarter || w.week !== s.week - 1) return null;
+  const projects = w.projects ?? [];
+  const events = [
+    ...w.causes.filter((c) => c.subject.endsWith(" left the team")).map((c) => c.subject),
+    ...projects.filter((p) => p.status === "shipped" || p.status === "late-shipped").map((p) => `${p.name} shipped`),
+    ...projects.filter((p) => p.status === "missed").map((p) => `${p.name} missed its date`),
+    ...projects.filter((p) => p.status === "active" && p.gain === 0).map((p) => `${p.name} stalled`),
+  ];
+  const biggest = [...w.causes]
+    .filter((c) => !c.subject.endsWith("progress") && !c.subject.endsWith(" left the team"))
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+    .slice(0, events.length ? 1 : 2)
+    .map((c) => `${c.subject} ${c.delta > 0 ? "+" : "−"}${Math.abs(c.delta)}`);
+  const parts = [...events, ...biggest];
+  if (!parts.length) return null;
+  return (
+    <p className="since-friday">
+      <b>Since Friday:</b> {parts.join(" · ")}
+    </p>
+  );
+}
+
 export function WeekScreen({ s, set, go, toast, directorStatus }: ScreenProps & { directorStatus?: string }) {
   const used = planCost(s);
   const open = undecided(s);
   const optionalOpen = open.filter((i) => !i.required).length;
   const allDecided = open.length === 0;
+  const unstaffed = s.projects.filter((p) => p.status === "active" && !s.engineers.some((e) => e.projectId === p.id));
   return (
     <>
       <div className="heading">
@@ -68,6 +95,15 @@ export function WeekScreen({ s, set, go, toast, directorStatus }: ScreenProps & 
       <p className="subtitle">
         {s.inbox.length} demands. {s.capacity} slots. Something has to give.
       </p>
+      <SinceFriday s={s} />
+      {unstaffed.length > 0 && (
+        <button type="button" className="notice danger notice-button" onClick={() => go({ name: "projects" })}>
+          <b>
+            {unstaffed.map((p) => p.name).join(" and ")} {unstaffed.length > 1 ? "have" : "has"} nobody on {unstaffed.length > 1 ? "them" : "it"}.
+          </b>
+          <p>No progress this week. Staff it on Projects →</p>
+        </button>
+      )}
       {used > s.capacity && (
         <div className="notice danger">
           <b>Overbooked by {slots(used - s.capacity)}.</b>
@@ -139,12 +175,12 @@ function DirectorPanel({ s, status }: { s: GameState; status?: string }) {
   const byDirector = s.inboxSource.by === "director";
   return (
     <details className="director-panel">
-      <summary>{byDirector ? "◆ Picked by the AI director · why?" : "◇ Random draw this week · details"}</summary>
+      <summary>{byDirector ? "◆ Debug: picked by the AI director · why?" : "◇ Debug: random draw this week · details"}</summary>
       {byDirector ? (
         <>
           {s.inboxSource.arcNote && (
             <p className="helper">
-              <b>Arc:</b> {s.inboxSource.arcNote}
+              <b>Director’s note:</b> {s.inboxSource.arcNote}
             </p>
           )}
           <div className="panel">
@@ -184,7 +220,7 @@ function Agenda({ s, set, go, toast }: ScreenProps) {
         {booked.map((i) => (
           <div className="agenda-row" key={i.id}>
             <span>
-              {i.from} · {slots(intentCost(i, s.plan.choices[i.id]))}
+              {i.title} · {slots(intentCost(i, s.plan.choices[i.id]))}
             </span>
             <button type="button" onClick={() => go({ name: "event", itemId: i.id })}>
               Change
@@ -246,6 +282,8 @@ export function EventScreen({ s, set, go, toast, itemId }: ScreenProps & { itemI
   if (!item) return <WeekScreen s={s} set={set} go={go} toast={toast} />;
   const selected = s.plan.choices[item.id];
   const remaining = undecided(s).filter((i) => i.id !== item.id);
+  // Callbacks: remind the player what they already promised this person.
+  const promises = item.subjectId && item.type !== "promise_due" ? s.facts.filter((f) => f.status === "open" && f.subjectId === item.subjectId) : [];
   const pick = (choice: string) => {
     const before = planCost(s);
     const next = choose(s, item.id, choice);
@@ -277,12 +315,11 @@ export function EventScreen({ s, set, go, toast, itemId }: ScreenProps & { itemI
       </div>
       <h1>{item.title}</h1>
       <p className="situation">{item.body}</p>
-      {selected && (
-        <div className={`notice ${selected === "ignore" ? "" : "success"}`}>
-          <b>{selected === "ignore" ? "↷ Marked to ignore" : "✓ Intent booked"}</b>
-          <p>{selected === "ignore" ? item.ignoreHint : "Reversible until Continue. Choosing another intent refunds the old slot cost."}</p>
-        </div>
-      )}
+      {promises.map((f) => (
+        <p className="context-line" key={f.id}>
+          ↺ You promised: {f.text} Due week {f.dueWeek}.
+        </p>
+      ))}
       <div className="section-head">
         <span>CHOOSE YOUR INTENT</span>
         <span>COST / HINTS</span>
@@ -302,7 +339,7 @@ export function EventScreen({ s, set, go, toast, itemId }: ScreenProps & { itemI
             </span>
             <span className="cost">{slots(intent.cost)}</span>
           </span>
-          <span className="intent-hints">{intent.hints}</span>
+          <HintChips hints={intent.hints} />
         </button>
       ))}
       <button
@@ -316,9 +353,11 @@ export function EventScreen({ s, set, go, toast, itemId }: ScreenProps & { itemI
           <span>{item.required ? "Ignore unavailable · must respond" : `${selected === "ignore" ? "✓ " : "↷ "}Ignore this demand`}</span>
           <span className="cost">0 slots</span>
         </span>
-        <span className="intent-hints">{item.ignoreHint}</span>
+        <HintChips hints={item.ignoreHint} />
       </button>
-      <p className="helper">Your choice spends time, not a guaranteed outcome. Hints show likely direction. Numbers resolve on Friday.</p>
+      <p className="helper">
+        {selected ? "Booked. You can change it until Continue; switching refunds the old cost. " : ""}Hints show direction, not exact numbers. Green helps you, red hurts. Numbers resolve on Friday.
+      </p>
       {selected &&
         (remaining.length ? (
           <>
@@ -521,7 +560,7 @@ export function PlayerScreen({ s, set, go, toast, id }: ScreenProps & { id: stri
           <span>{booked ? "✓ 1:1 booked · tap to refund" : "Book a 1:1"}</span>
           <span className="cost">1 slot</span>
         </span>
-        <span className="intent-hints">Morale ↑ · Reveals a trait or Loyalty</span>
+        <HintChips hints="Morale ↑ · Reveals a trait or Loyalty" />
       </button>
       <button
         type="button"
@@ -555,6 +594,7 @@ export function PlayerScreen({ s, set, go, toast, id }: ScreenProps & { id: stri
 export function ProjectsScreen({ s, set, go, toast }: ScreenProps) {
   const activeCount = s.projects.filter((p) => p.status === "active").length;
   const oncall = s.engineers.find((e) => e.id === s.plan.oncallId);
+  const forecasts = forecastAll(s);
   return (
     <>
       <div className="heading">
@@ -567,17 +607,7 @@ export function ProjectsScreen({ s, set, go, toast }: ScreenProps) {
           const pct = Math.round((p.progress / p.scope) * 100);
           const expected = Math.round((expectedProgress(p, s.week) / p.scope) * 100);
           const team = s.engineers.filter((e) => e.projectId === p.id);
-          const weekly = Math.round(team.reduce((n, e) => n + engineerOutput(e, s.techDebt), 0));
-          const status =
-            p.status === "shipped"
-              ? ["good", "Shipped"]
-              : p.status === "late-shipped"
-                ? ["warn", "Shipped late"]
-                : p.status === "missed"
-                  ? ["bad", "Missed"]
-                  : pct >= expected
-                    ? ["good", "On track"]
-                    : ["bad", "At risk"];
+          const f = forecasts[p.id];
           const owner = s.stakeholders.find((x) => x.role === p.owner)!;
           return (
             <section className="project" key={p.id}>
@@ -586,24 +616,24 @@ export function ProjectsScreen({ s, set, go, toast }: ScreenProps) {
                   {p.name}
                   {p.flagship && s.company === "Vercel" ? " ★" : ""}
                 </h2>
-                <span className={`mini ${status[0]}`}>{status[1]}</span>
+                <span className="mini">DUE WK {p.dueWeek}</span>
               </div>
-              <p className="mini">
-                {owner.name} · {p.owner === "pm" ? "PM" : p.owner === "skip" ? "Skip-level" : "Peer EM"} · DUE WEEK {p.dueWeek}
-              </p>
+              <p className={`forecast ${forecastTone(f)}`}>{forecastLabel(f)}</p>
               <div className="meter" role="meter" aria-label={`${p.name} progress`} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
                 <b style={{ width: `${pct}%` }} />
-                {p.status === "active" && <span className="deadline" style={{ left: `${expected}%` }} title="Expected progress by now" />}
+                {p.status === "active" && <span className="deadline" style={{ left: `${expected}%` }} title="Where it should be by now" />}
               </div>
-              <div className="split mini">
+              <div className="split project-meta">
                 <span>
-                  {p.progress} / {p.scope} POINTS
+                  {p.progress}/{p.scope} pts{p.status === "active" ? ` · ~${f.weekly}/wk` : ""}
                 </span>
-                <span>{p.status === "active" ? `│ EXPECTED ${expectedProgress(p, s.week)} · ~${weekly}/WK` : ""}</span>
+                <span>
+                  {owner.name.split(" ")[0]} · {p.owner === "pm" ? "PM" : p.owner === "skip" ? "Skip-level" : "Peer EM"}
+                </span>
               </div>
               {p.status === "active" && (
                 <button type="button" onClick={() => go({ name: "assign", projectId: p.id })}>
-                  {team.map((e) => first(e.name)).join(" + ") || "No engineers assigned"} · Edit staffing →
+                  {team.map((e) => first(e.name)).join(" + ") || "Nobody assigned"} · Edit staffing →
                 </button>
               )}
             </section>
@@ -612,8 +642,8 @@ export function ProjectsScreen({ s, set, go, toast }: ScreenProps) {
       </div>
       {s.engineers.some((e) => !e.projectId) && (
         <div className="notice">
-          <b>{s.engineers.filter((e) => !e.projectId).map((e) => first(e.name)).join(", ")} unassigned.</b>
-          <p>Unassigned engineers recover Energy but add no progress.</p>
+          <b>Resting: {s.engineers.filter((e) => !e.projectId).map((e) => first(e.name)).join(", ")}.</b>
+          <p>Resting engineers add no progress but recover +2 Energy a week.</p>
         </div>
       )}
       <div className="section-head">
@@ -639,7 +669,7 @@ export function ProjectsScreen({ s, set, go, toast }: ScreenProps) {
           ))}
         </select>
         <p className="helper">
-          {oncall ? `On call: ${oncall.name}.` : "Nobody is on call."} Debugging affects incidents. Energy drains on call, more if the pager fires.
+          {oncall ? `On call: ${oncall.name}.` : "Nobody is on call: every incident escalates to you."} Cost: −1 Energy a week, −1 to −4 more if the pager fires. Higher Debugging fixes incidents faster.
         </p>
       </div>
       <div className="section-head">
@@ -677,42 +707,71 @@ export function ProjectsScreen({ s, set, go, toast }: ScreenProps) {
 export function AssignScreen({ s, set, go, toast, projectId }: ScreenProps & { projectId: string }) {
   const p = s.projects.find((x) => x.id === projectId);
   if (!p) return <ProjectsScreen s={s} set={set} go={go} toast={toast} />;
-  const projectName = (id: string | null) => s.projects.find((x) => x.id === id)?.name ?? "Unassigned";
+  const name = (id: string | null) => s.projects.find((x) => x.id === id)?.name ?? "";
+  const finish = (fc: Forecast) => (fc.finishWeek === null ? "never finishes" : fc.finishWeek > 12 ? "not this quarter" : `done wk ${fc.finishWeek}`);
+  const now = forecastAll(s)[p.id];
+  const groups: { title: string; people: typeof s.engineers }[] = [
+    { title: `ON ${p.name.toUpperCase()}`, people: s.engineers.filter((e) => e.projectId === p.id) },
+    { title: "ON OTHER PROJECTS", people: s.engineers.filter((e) => e.projectId && e.projectId !== p.id) },
+    { title: "RESTING · +2 ENERGY/WK", people: s.engineers.filter((e) => !e.projectId) },
+  ];
   return (
     <>
       <Btn kind="back" onClick={() => go({ name: "projects" })}>
         ← Projects
       </Btn>
       <h1>Staff {p.name}.</h1>
-      <p className="subtitle">One primary project per engineer. Assignments are free; their time is not infinite.</p>
-      <div className="panel">
-        {s.engineers.map((e) => {
-          const here = e.projectId === p.id;
-          return (
-            <button
-              type="button"
-              key={e.id}
-              className={`intent ${here ? "selected" : ""}`}
-              style={{ margin: 0, borderWidth: "0 0 1px", boxShadow: "none" }}
-              aria-pressed={here}
-              onClick={() => {
-                set(assign(s, e.id, here ? null : p.id));
-                toast(here ? `${first(e.name)} unassigned · no slots spent` : `${first(e.name)} moved to ${p.name}`);
-              }}
-            >
-              <span className="intent-main">
-                <span>{e.name}</span>
-                <span>{here ? "✓" : "＋"}</span>
-              </span>
-              <span className="intent-hints">
-                Coding {e.attrs.coding} · Morale {e.attrs.morale} · Energy {e.attrs.energy} · ~{Math.round(engineerOutput(e, s.techDebt))} pts/wk
-                <br />
-                {here ? "Assigned here · tap to unassign" : e.projectId ? `Move from ${projectName(e.projectId)}` : "Currently unassigned"}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      <p className={`forecast ${forecastTone(now)}`}>Now: {forecastLabel(now)}</p>
+      <p className="subtitle">Each engineer works on one project. Moving someone is free, but the project they leave slows down.</p>
+      {groups.map((g) =>
+        g.people.length ? (
+          <div key={g.title}>
+            <div className="section-head">
+              <span>{g.title}</span>
+            </div>
+            <div className="panel">
+              {g.people.map((e) => {
+                const here = e.projectId === p.id;
+                const target = here ? null : p.id;
+                const after = forecastMove(s, e.id, target);
+                const preview = here
+                  ? `Rest them: ${p.name} ${finish(after[p.id])} (due ${p.dueWeek})`
+                  : `${p.name} ${finish(after[p.id])} (due ${p.dueWeek})${e.projectId ? ` · ${name(e.projectId)} ${finish(after[e.projectId])} (due ${s.projects.find((x) => x.id === e.projectId)!.dueWeek})` : ""}`;
+                const late = here
+                  ? after[p.id].kind !== "on-track"
+                  : after[p.id].kind !== "on-track" || (!!e.projectId && after[e.projectId].kind !== "on-track");
+                return (
+                  <button
+                    type="button"
+                    key={e.id}
+                    className={`intent staff-row ${here ? "selected" : ""}`}
+                    aria-pressed={here}
+                    onClick={() => {
+                      set(assign(s, e.id, target));
+                      toast(here ? `${first(e.name)} is resting · +2 Energy/wk` : `${first(e.name)} moved to ${p.name}`);
+                    }}
+                  >
+                    <span className="intent-main">
+                      <span>
+                        {here ? "✓ " : ""}
+                        {e.name}
+                      </span>
+                      <span className="cost">~{Math.round(engineerOutput(e, s.techDebt))} pts/wk</span>
+                    </span>
+                    <span className="staff-stats">
+                      Coding <Num v={e.attrs.coding} /> Morale <Num v={e.attrs.morale} /> Energy <Num v={e.attrs.energy} />
+                    </span>
+                    <span className={`staff-preview ${late ? "bad" : "good"}`}>
+                      {here ? "Tap to rest · " : "Tap to move here · "}
+                      {preview}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null,
+      )}
       <Btn kind="primary" onClick={() => go({ name: "projects" })}>
         Done · review projects →
       </Btn>
@@ -735,6 +794,11 @@ export function OfficeScreen({
   const [importText, setImportText] = useState("");
   const free = s.capital - capitalCommitted(s);
   const promises = s.facts.filter((f) => f.kind === "promise" && f.status === "open");
+  // Promises chosen this week, before Friday locks them in.
+  const pending = s.inbox.flatMap((item) => {
+    const intent = item.intents.find((i) => i.id === s.plan.choices[item.id]);
+    return (intent?.effects ?? []).flatMap((ef) => (ef.k === "promise" ? [{ id: `${item.id}-${ef.text}`, text: ef.text, due: Math.min(12, s.week + ef.dueIn) }] : []));
+  });
   return (
     <>
       <div className="panel career-strip">
@@ -813,7 +877,7 @@ export function OfficeScreen({
               </span>
               <span className="cost">{a.cost} PC</span>
             </span>
-            <span className="intent-hints">{reason && !on ? reason : a.hints}</span>
+            {reason && !on ? <span className="intent-hints">{reason}</span> : <HintChips hints={a.hints} />}
           </button>
         );
       })}
@@ -821,7 +885,13 @@ export function OfficeScreen({
         <span>YOU OWE</span>
         <span>FACT LEDGER</span>
       </div>
-      {promises.length ? (
+      {pending.map((f) => (
+        <div className="panel promise" key={f.id}>
+          <b>{f.text}</b>
+          <p>Promising this week · Due week {f.due} · Locks in on Friday</p>
+        </div>
+      ))}
+      {promises.length || pending.length ? (
         promises.map((f) => (
           <div className="panel promise" key={f.id}>
             <b>{f.text}</b>

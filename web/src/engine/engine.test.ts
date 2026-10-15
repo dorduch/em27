@@ -80,7 +80,7 @@ describe("calendar", () => {
     const r = resolveWeek(s);
     const optional = s.inbox.filter((i) => !i.required && i.type !== "postmortem");
     for (const item of optional) {
-      expect(r.lastWeek!.lines.some((l) => l.text.startsWith(item.ignoreCause))).toBe(true);
+      expect(r.lastWeek!.lines.some((l) => l.text.includes(item.ignoreCause))).toBe(true);
     }
   });
 

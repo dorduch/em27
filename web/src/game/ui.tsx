@@ -2,7 +2,8 @@
 
 import { Fragment, type ReactNode } from "react";
 import { COMPANIES, KEYNOTE_WEEK, PACKET_TARGET } from "@/content/companies";
-import { blockingItem, planCost, undecided } from "@/engine/plan";
+import { blockingItem, planCost, projectedCapacity, projectedStress, undecided } from "@/engine/plan";
+import { splitHints } from "@/engine/hints";
 import type { CompanyId, GameState } from "@/engine/types";
 
 export const first = (name: string) => name.split(" ")[0];
@@ -55,22 +56,20 @@ export function Header({
   s,
   title,
   edition,
-  onTheme,
   bar = true,
 }: {
   s: GameState | null;
   title?: string;
   edition?: string;
-  onTheme: () => void;
   bar?: boolean; // the red EM27 title bar; the title screen has its own hero instead
 }) {
+  const status = s && s.phase !== "recap" ? companyStatus(s) : null;
   return (
     <>
-      <div className="window-caption">
+      {/* Decorative window chrome, as in the CM 01/02 reference. Theme switching lives on Title and Office. */}
+      <div className="window-caption" aria-hidden="true">
         <span>▣ Engineering Manager 2027</span>
-        <button type="button" onClick={onTheme} aria-label="Switch light or dark theme">
-          ◐ ▱ □ ×
-        </button>
+        <span>▱ □ ×</span>
       </div>
       {bar && (
         <header className="topbar">
@@ -85,92 +84,88 @@ export function Header({
           )}
         </header>
       )}
-      {s && s.phase !== "recap" && (
+      {s && status && (
         <div className="season">
           <span>
-            Q{s.quarter} / {s.level.toUpperCase()}
+            Q{s.quarter} / {s.level.toUpperCase()} · WK {String(s.week).padStart(2, "0")}/12 · {s.phase === "plan" ? "MON" : "FRI"}
           </span>
-          <span>WEEK {String(s.week).padStart(2, "0")} OF 12 · {s.phase === "plan" ? "MON" : "FRI"}</span>
+          <span className="season-co">
+            <b>{status.label}</b> {status.text}
+          </span>
         </div>
       )}
-      {s && s.phase !== "recap" && <CompanyStatus s={s} />}
     </>
   );
 }
 
-export function CompanyStatus({ s }: { s: GameState }) {
+/** The company's own mechanic, as a short label and status. */
+export function companyStatus(s: GameState): { label: string; text: string } {
   if (s.company === "Vercel") {
     const flagship = s.projects.find((p) => p.flagship);
     const done = flagship && flagship.status !== "active";
-    return (
-      <div className="company-status">
-        <b>KEYNOTE / WK {KEYNOTE_WEEK}</b>
-        <span>
-          {s.week > KEYNOTE_WEEK || (s.week === KEYNOTE_WEEK && s.phase !== "plan")
-            ? flagship?.status === "shipped"
-              ? "Shipped on stage"
-              : "Keynote missed"
-            : done && flagship!.status === "shipped"
-              ? `Ready for stage · ${KEYNOTE_WEEK - s.week === 0 ? "this Friday" : `${KEYNOTE_WEEK - s.week} wk${KEYNOTE_WEEK - s.week === 1 ? "" : "s"}`}`
-            : done
-              ? "Flagship missed its date"
-            : s.week < KEYNOTE_WEEK
-              ? `${KEYNOTE_WEEK - s.week} week${KEYNOTE_WEEK - s.week === 1 ? "" : "s"} to stage`
-              : s.week === KEYNOTE_WEEK
-                ? "ON STAGE THIS FRIDAY"
-                : "Keynote completed"}{" "}
-          · fixed date
-        </span>
-      </div>
-    );
+    const left = KEYNOTE_WEEK - s.week;
+    const text =
+      s.week > KEYNOTE_WEEK || (s.week === KEYNOTE_WEEK && s.phase !== "plan")
+        ? flagship?.status === "shipped"
+          ? "shipped on stage"
+          : "keynote missed"
+        : done && flagship!.status === "shipped"
+          ? left === 0
+            ? "ready · on stage Friday"
+            : `ready · ${left} wk${left === 1 ? "" : "s"} to stage`
+          : done
+            ? "flagship missed"
+            : left > 0
+              ? `${left} wk${left === 1 ? "" : "s"} to stage`
+              : "on stage this Friday";
+    return { label: `KEYNOTE WK ${KEYNOTE_WEEK}`, text };
   }
   if (s.company === "Stripe") {
-    return (
-      <div className="company-status">
-        <b>INCIDENT REVIEWS</b>
-        <span>
-          {s.pendingPostmortem && s.phase === "plan" ? "Postmortem due this week" : `Incident Trust hit ×2${s.incidentMultiplier > 1 ? ` · ×${s.incidentMultiplier} penalty` : ""}`}
-        </span>
-      </div>
-    );
+    return {
+      label: "INCIDENTS ×2",
+      text: s.pendingPostmortem && s.phase === "plan" ? "postmortem due" : s.incidentMultiplier > 1 ? `penalty ×${s.incidentMultiplier}` : "reviews halve it",
+    };
   }
-  return (
-    <div className="company-status">
-      <b>PROMO PACKET</b>
-      <span>
-        {s.packet}/{PACKET_TARGET} evidence · calibration at review
-      </span>
-    </div>
-  );
+  return { label: "PACKET", text: `${Math.min(s.packet, PACKET_TARGET)}/${PACKET_TARGET} evidence` };
 }
 
 export function Calendar({ s, onAgenda }: { s: GameState; onAgenda: () => void }) {
   const used = planCost(s);
   const cap = s.capacity;
   const shown = Math.min(Math.max(cap, used), 12);
+  const over = used - cap;
   return (
     <section className="calendar" aria-label="Calendar budget">
       <div className="cal-head">
-        <span className="eyebrow">
-          WEEK {s.week} / {s.level.toUpperCase()}
+        <span className="eyebrow">YOUR CALENDAR</span>
+        <span className={`cal-value ${over > 0 ? "bad" : ""}`}>
+          {over > 0 ? `${over} OVER · Stress ${projectedStress(s, used)} · next wk ${projectedCapacity(s, used)} slots` : `${cap - used} OF ${cap} LEFT`}
         </span>
-        <span className={`cal-value ${used > cap ? "bad" : ""}`}>{used > cap ? `${used - cap} OVERBOOKED` : `${cap - used} OF ${cap} LEFT`}</span>
       </div>
-      <div className="slots" aria-label={`${used} slots used, ${cap} available`}>
+      <button type="button" className="slots" onClick={onAgenda} aria-label={`${used} of ${cap} slots booked. View bookings`}>
         {Array.from({ length: shown }, (_, i) => (
           <span key={i} className={`slot ${i < used ? "filled" : ""} ${i >= cap ? "extra" : ""}`}>
             {i < used ? (i >= cap ? "+" : "■") : "·"}
           </span>
         ))}
         {used > 12 && <span className="slot extra">+{used - 12}</span>}
-      </div>
-      <div className="cal-foot">
-        <span>{used > cap ? "! Extra time adds Stress" : `${used} booked · ${cap - used} available`}</span>
-        <button type="button" onClick={onAgenda}>
-          View bookings ↓
-        </button>
-      </div>
+      </button>
     </section>
+  );
+}
+
+/** Hint text split into chips coloured by whether each effect is good or bad for the player. */
+export function HintChips({ hints }: { hints: string }) {
+  const chips = splitHints(hints);
+  if (!chips.length) return null;
+  return (
+    <span className="intent-hints hint-chips">
+      {chips.map((c, i) => (
+        <span key={i} className={`hint ${c.valence}`}>
+          {c.text}
+        </span>
+      ))}
+    </span>
   );
 }
 
