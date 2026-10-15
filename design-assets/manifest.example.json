@@ -1,0 +1,15 @@
+{
+  "name":"EM27 Engineering Manager",
+  "short_name":"EM27",
+  "id":"/",
+  "start_url":"/",
+  "scope":"/",
+  "display":"standalone",
+  "background_color":"#13015e",
+  "theme_color":"#13015e",
+  "icons":[
+    {"src":"/artwork/app-icon-192.png","sizes":"192x192","type":"image/png","purpose":"any"},
+    {"src":"/artwork/app-icon-512.png","sizes":"512x512","type":"image/png","purpose":"any"},
+    {"src":"/artwork/app-icon-maskable-512.png","sizes":"512x512","type":"image/png","purpose":"maskable"}
+  ]
+}

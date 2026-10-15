@@ -1,0 +1,74 @@
+{
+  "date": "2026-10-15",
+  "referenceScreen": [
+    390,
+    844
+  ],
+  "layoutChecks": {
+    "states": 35,
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "widths": [
+      320,
+      390
+    ],
+    "combinations": 140,
+    "horizontalOverflowFailures": 0,
+    "appButtonHeightBelow44px": 0
+  },
+  "interactionChecks": [
+    "required item routes to event",
+    "intent booking spends slots",
+    "intent replacement refunds prior cost",
+    "1:1 refund restores slot",
+    "on-call selection updates",
+    "engineer assignment updates",
+    "Friday show-all reveals 7 lines",
+    "back page opens",
+    "next week resets plan",
+    "local save restores after reload",
+    "week 5 routes to check-in",
+    "week 11 routes to planning week 12",
+    "completed week 12 routes to review"
+  ],
+  "browserErrorsDuringInteractionChecks": [],
+  "exports": {
+    "mobileScreenPNGs": 90,
+    "iconPNGs": 4,
+    "splashPNGs": 2,
+    "portraitRecapPNGs": 2
+  },
+  "visualInspection": [
+    "CM player profile vs supplied reference",
+    "light/dark screen contact sheet",
+    "long-copy wrapping"
+  ],
+  "scope": "Design prototype aligned to the updated career brief. Balance and deterministic career engine remain unimplemented.",
+  "revision": 3,
+  "visualReference": "User-supplied CM 01/02 screenshot",
+  "revision2InteractionChecks": [
+    "required gating",
+    "slot spending",
+    "replacement net cost",
+    "Friday commentary",
+    "back page",
+    "Profile History navigation"
+  ],
+  "briefSHA256": "f494a0df0db269141223a9c72a73ce0951c8527c8195632a6b3a305d533f996a",
+  "careerChecks": [
+    "promotion to nine slots",
+    "eight-engineer squad",
+    "first firing to other-company hunt",
+    "weak Reputation downgrade",
+    "farewell per engineer",
+    "new company and fictional squad",
+    "career save recovery",
+    "second firing ends run",
+    "postmortem spend and refund",
+    "keynote Continue routing",
+    "PNG recap download"
+  ],
+  "careerFailures": []
+}

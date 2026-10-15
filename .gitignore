@@ -1,0 +1,10 @@
+.DS_Store
+.env*
+node_modules/
+
+# Local tooling
+.claude/
+.playwright-mcp/
+
+# Duplicate archive of design-assets/
+em27-design-assets.zip
