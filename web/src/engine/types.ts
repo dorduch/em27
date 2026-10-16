@@ -111,7 +111,12 @@ export type Effect =
   | { k: "leave"; who: string }
   | { k: "hire" }
   | { k: "chance"; p: number; then: Effect[]; else?: Effect[]; note: string }
-  | { k: "teamAttr"; attr: AttrKey; d: number };
+  | { k: "teamAttr"; attr: AttrKey; d: number }
+  | { k: "levelUp"; who: string }
+  // Storyline effects: only act when the item belongs to a storyline.
+  | { k: "arc"; to: string; wait: [number, number] } // schedule the next beat in min..max weeks
+  | { k: "arcEnd"; outcome: string } // close the storyline with an outcome
+  | { k: "arcFlag"; flag: string }; // remember a choice for later beats
 
 export interface IntentSpec {
   id: string;
@@ -139,8 +144,33 @@ export interface InboxItem {
   ignoreEffects: Effect[];
   ignoreCause: string;
   subjectId?: string;
+  projectId?: string; // the project a one-off is about, if any
   factId?: string;
   why?: string; // the AI director's reason for picking this demand
+  /** Set when the item is a beat of a storyline. `start` marks the beat that opened it this week. */
+  arc?: { id: string; storyline: string; beat: string; start?: boolean; otherId?: string; projectId?: string };
+}
+
+/** A running storyline: who it is about, which beat comes next, and when. */
+export interface ArcState {
+  id: string;
+  storyline: string;
+  subjectId: string;
+  otherId?: string; // a second person, when the storyline is between two people
+  projectId?: string;
+  beat: string;
+  /** Absolute week (quarter * 12 + week) from which the beat may appear. Lets storylines cross quarters. */
+  due: number;
+  flags: string[];
+  started: number;
+}
+
+/** How a storyline ended. Later storylines read this (a broken promo makes a flight risk likelier). */
+export interface ArcRecord {
+  storyline: string;
+  subjectId: string;
+  outcome: string;
+  ended: number;
 }
 
 /** The AI director's choice of next week's demands. Picks are candidate ids from candidatePool(). */
@@ -271,6 +301,8 @@ export interface GameState {
   capacity: number; // this week's slot budget
   recentTypes: string[]; // anti-repeat window
   quarterEvents: string[]; // event types seen this quarter (for once-per-quarter events)
+  arcs: ArcState[]; // running storylines
+  arcHistory: ArcRecord[];
   directorPlan: DirectorPlan | null; // next week's picks, if the AI director answered in time
   inboxSource: { by: "director" | "random"; arcNote?: string }; // who chose this week's demands
   pendingPostmortem: { role: StakeholderRole; hit: number } | null; // Stripe: last week's incident awaiting review

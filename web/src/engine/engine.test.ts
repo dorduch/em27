@@ -198,7 +198,8 @@ describe("company mechanics", () => {
   it("Vercel: a flagship that shipped early is judged on stage in week 8", () => {
     let s = newGame("Vercel", 5);
     // Ship the flagship early.
-    s = { ...s, projects: s.projects.map((p) => (p.flagship ? { ...p, progress: p.scope - 1 } : p)) };
+    // An empty week-1 inbox, so no demand's side effects (scope creep, a departure) interfere.
+    s = { ...s, inbox: [], projects: s.projects.map((p) => (p.flagship ? { ...p, progress: p.scope - 1 } : p)) };
     s = playWeek(s);
     expect(s.projects.find((p) => p.flagship)!.status).toBe("shipped");
     s = playTo(s, 8);
@@ -295,7 +296,13 @@ describe("AI director", () => {
     const s = friday();
     const brief = directorBrief(s)!;
     const byType = new Map<string, string>();
-    for (const c of brief.candidates) if (!byType.has(c.type)) byType.set(c.type, c.id);
+    let opening = false;
+    // Must-respond-capable candidates first, so the plan has one to mark.
+    for (const c of [...brief.candidates].sort((x, y) => Number(y.canBeMustRespond) - Number(x.canBeMustRespond))) {
+      if (byType.has(c.type) || (c.opensStoryline && opening)) continue;
+      opening ||= c.opensStoryline;
+      byType.set(c.type, c.id);
+    }
     const picks = [...byType.values()].slice(0, brief.pick);
     const requiredId = picks.find((id) => brief.candidates.find((c) => c.id === id)!.canBeMustRespond)!;
     const plan: DirectorPlan = {
@@ -310,7 +317,7 @@ describe("AI director", () => {
     expect(accepted).toBe(true);
     const monday = toMonday(state);
     expect(monday.inboxSource).toEqual({ by: "director", arcNote: plan.arcNote });
-    const regular = monday.inbox.filter((i) => i.cat !== "FOLLOW-UP");
+    const regular = monday.inbox.filter((i) => i.cat !== "FOLLOW-UP" && !(i.arc && !i.arc.start));
     expect(regular.map((i) => i.type).sort()).toEqual(picks.map((id) => id.split(":")[0]).sort());
     expect(regular.filter((i) => i.required).map((i) => i.type)).toEqual([requiredId.split(":")[0]]);
     expect(regular.every((i) => i.why?.startsWith("reason for"))).toBe(true);

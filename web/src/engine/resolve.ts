@@ -2,7 +2,8 @@
 
 import { COMPANIES, KEYNOTE_WEEK } from "@/content/companies";
 import { TRAIT_LABEL } from "@/content/people";
-import { fillInbox, rememberTypes } from "./inbox";
+import { beatCtx, storylineById } from "@/content/storylines";
+import { baseCtx, fillInbox, now, rememberTypes } from "./inbox";
 import {
   capacityFor,
   FOCUS_RELIEF,
@@ -14,6 +15,7 @@ import {
 import { makeRng, type Rng } from "./rng";
 import { makeEngineer, TEAM_SIZE } from "./setup";
 import type {
+  ArcState,
   AttrKey,
   Cause,
   Effect,
@@ -61,6 +63,9 @@ class Resolver {
   lines: FridayLine[] = [];
   hires = 0;
   minute = 9 * 60 + 5;
+  /** The storyline the item being resolved belongs to, and whether a choice moved it on. */
+  arc: ArcState | undefined;
+  arcMoved = false;
 
   constructor(
     public d: GameState,
@@ -136,6 +141,11 @@ class Resolver {
     this.cause(`${first(e)} left the team`, -1, why);
     this.line(`${e.name} hands in their notice. <b class="bad">Headcount −1.</b>`, why, "bad");
     for (const o of this.d.engineers) this.attr(o, "morale", -1, `${first(e)} left`);
+  }
+
+  endArc(arc: ArcState, outcome: string) {
+    this.d.arcs = this.d.arcs.filter((a) => a.id !== arc.id);
+    this.d.arcHistory.push({ storyline: arc.storyline, subjectId: arc.subjectId, outcome, ended: now(this.d) });
   }
 
   apply(effects: Effect[], why: string): string[] {
@@ -234,6 +244,31 @@ class Resolver {
         case "hire":
           this.hires++;
           break;
+        case "levelUp": {
+          const e = this.eng(ef.who);
+          if (e && e.level < 7) {
+            e.level += 1;
+            this.cause(`${first(e)}’s level`, 1, why, e);
+            this.line(`${e.name} is promoted to L${e.level}.`, why, "good");
+          }
+          break;
+        }
+        case "arc":
+          if (this.arc) {
+            this.arc.beat = ef.to;
+            this.arc.due = now(this.d) + this.rng.int(ef.wait[0], ef.wait[1]);
+            this.arcMoved = true;
+          }
+          break;
+        case "arcEnd":
+          if (this.arc) {
+            this.endArc(this.arc, ef.outcome);
+            this.arcMoved = true;
+          }
+          break;
+        case "arcFlag":
+          if (this.arc && !this.arc.flags.includes(ef.flag)) this.arc.flags.push(ef.flag);
+          break;
         case "chance": {
           const hit = this.rng.chance(ef.p);
           if (hit) notes.push(ef.note.toLowerCase());
@@ -274,6 +309,8 @@ export function resolveWeek(s: GameState): GameState {
     const slid: string[] = [];
     for (const item of s.inbox) {
       const choice = s.plan.choices[item.id] ?? "ignore";
+      r.arc = item.arc ? d.arcs.find((a) => a.id === item.arc!.id) : undefined;
+      r.arcMoved = false;
       if (item.type === "postmortem") {
         const pm = d.pendingPostmortem;
         const oncallEng = d.plan.oncallId ? r.eng(d.plan.oncallId) : undefined;
@@ -309,6 +346,18 @@ export function resolveWeek(s: GameState): GameState {
         if (notes.length) r.line(`${intent.cause} (${notes.join(", ")}).`, `${item.from} → your response`);
         else calls.push(intent.cause);
       }
+      // A storyline beat that didn't schedule another one is over.
+      if (r.arc && !r.arcMoved && d.arcs.includes(r.arc)) r.endArc(r.arc, "faded");
+      r.arc = undefined;
+    }
+    // 1b. Storylines still open wear on people while they wait.
+    for (const arc of [...d.arcs]) {
+      const sl = storylineById(arc.storyline);
+      const ctx = sl?.simmer && beatCtx(baseCtx(d), arc);
+      const cost = ctx && sl.simmer!(ctx, arc.beat);
+      if (!cost) continue;
+      r.apply(cost.effects, cost.why);
+      r.line(`${cost.why}.`, `${sl.title} → still unresolved`, "bad");
     }
     if (calls.length) r.line(`Your calls: ${calls.join("; ")}.`, "Your decisions → applied");
     if (slid.length) r.line(`Let slide: ${slid.join("; ")}.`, "Ignored, no immediate cost");

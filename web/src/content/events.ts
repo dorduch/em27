@@ -44,22 +44,29 @@ export interface EventType {
   cat: Category;
   /** Can this event be the week's single must-respond item? */
   canBeRequired: boolean;
+  /**
+   * A one-off needs a three-week gap before it can come back (so at most three a quarter). Events
+   * tied to the quarterly calendar (the QBR deck, the keynote) happen once a quarter. An event
+   * that recurs about different things (another project blowing its estimate) is counted per
+   * project or person instead.
+   */
+  oncePer?: "project" | "subject" | "quarter";
   weight: (s: GameState) => number;
   setup: (ctx: EventCtx, rng: Rng) => EventCtx | null;
   build: (ctx: EventCtx) => EventBody;
 }
 
-const first = (e: Engineer) => e.name.split(" ")[0];
-const active = (s: GameState) => s.projects.filter((p) => p.status === "active");
-const levelTitle = (e: Engineer) => `${e.level >= 5 ? "Senior Engineer" : "Engineer"} · L${e.level}`;
-const by = <T,>(arr: T[], f: (x: T) => number) => [...arr].sort((a, b) => f(b) - f(a));
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+export const first = (e: Engineer) => e.name.split(" ")[0];
+export const active = (s: GameState) => s.projects.filter((p) => p.status === "active");
+export const levelTitle = (e: Engineer) => `${e.level >= 5 ? "Senior Engineer" : "Engineer"} · L${e.level}`;
+export const by = <T,>(arr: T[], f: (x: T) => number) => [...arr].sort((a, b) => f(b) - f(a));
+export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 /** Hidden-Loyalty-driven odds. The number never appears in hint text. */
-const loyaltyOdds = (e: Engineer, base: number) => clamp(base + e.loyalty / 25, 0.15, 0.92);
+export const loyaltyOdds = (e: Engineer, base: number) => clamp(base + e.loyalty / 25, 0.15, 0.92);
 const seenThisQuarter = (s: GameState, id: string) => (s.quarterEvents ?? []).includes(id);
-const projectOf = (s: GameState, e: Engineer) => s.projects.find((p) => p.id === e.projectId && p.status === "active");
+export const projectOf = (s: GameState, e: Engineer) => s.projects.find((p) => p.id === e.projectId && p.status === "active");
 
-const E = {
+export const E = {
   attr: (who: string, attr: "coding" | "debugging" | "communication" | "ambition" | "morale" | "energy", d: number): Effect => ({ k: "attr", who, attr, d }),
   loyalty: (who: string, d: number): Effect => ({ k: "loyalty", who, d }),
   trust: (role: "skip" | "pm" | "peer", d: number): Effect => ({ k: "trust", role, d }),
@@ -74,125 +81,10 @@ const E = {
 export const EVENT_TYPES: EventType[] = [
   /* ---------------------------------- PEOPLE ---------------------------------- */
   {
-    id: "promo_request",
-    cat: "PEOPLE",
-    canBeRequired: true,
-    weight: (s) => (s.engineers.some((e) => e.attrs.ambition >= 13 && e.level >= 4) ? 3 : 0),
-    setup: (ctx, rng) => {
-      const pool = ctx.s.engineers.filter((e) => e.attrs.ambition >= 13 && e.level >= 4);
-      if (!pool.length) return null;
-      return { ...ctx, subject: rng.pick(by(pool, (e) => e.attrs.ambition).slice(0, 2)) };
-    },
-    build: ({ subject: e, s }) => {
-      const p = projectOf(s, e!) ?? active(s)[0];
-      return {
-        from: e!.name,
-        fromRole: levelTitle(e!),
-        title: "“Got a sec?”",
-        body: `${first(e!)}’s calendar shows a 45-minute “dentist appointment” for the third time this month. ${first(e!)} asks whether the promo packet is still happening this cycle.`,
-        intents: [
-          {
-            id: "commit",
-            label: "Commit to the promo, in writing",
-            cost: 1,
-            hints: `Morale ↑ · Promise due wk ${Math.min(12, s.week + 6)}`,
-            effects: [
-              E.attr(e!.id, "morale", 3),
-              {
-                k: "promise",
-                who: e!.id,
-                text: `${first(e!)}: promotion packet this cycle.`,
-                dueIn: 6,
-                payload: [E.meter("capital", -6), E.meter("packet", 1)],
-                payloadHint: "Political Capital ↓",
-              },
-            ],
-            cause: "Written promotion commitment",
-          },
-          {
-            id: "honest",
-            label: "Be honest: it won’t make this calibration",
-            cost: 1,
-            hints: "Morale ↓ · Loyalty ↑ · Reveals a trait or Loyalty",
-            effects: [E.attr(e!.id, "morale", -2), E.loyalty(e!.id, 2), { k: "scout", who: e!.id, d: 1 }],
-            cause: "An honest conversation about calibration",
-          },
-          {
-            id: "redirect",
-            label: `Offer tech lead on ${p ? p.name : "the next project"}`,
-            cost: 1,
-            hints: "Ambition ✓ · Project risk",
-            effects: [E.attr(e!.id, "morale", 2), ...(p ? [E.progress(p.id, -4)] : [])],
-            cause: "Tech lead role instead of a promise",
-          },
-        ],
-        ignoreHint: "Morale ↓ · Loyalty ↓",
-        ignoreEffects: [E.attr(e!.id, "morale", -3), E.loyalty(e!.id, -2)],
-        ignoreCause: "Promotion question left unanswered",
-      };
-    },
-  },
-  {
-    id: "burnout",
-    cat: "PEOPLE",
-    canBeRequired: true,
-    weight: (s) => (s.engineers.some((e) => e.attrs.energy <= 9) ? 4 : 1),
-    setup: (ctx) => {
-      const e = by(ctx.s.engineers, (x) => -x.attrs.energy)[0];
-      return e ? { ...ctx, subject: e } : null;
-    },
-    build: ({ subject: e, s }) => {
-      const p = projectOf(s, e!);
-      const onCall = s.plan.oncallId === e!.id;
-      return {
-        from: e!.name,
-        fromRole: levelTitle(e!),
-        title: "The pager is still in my dreams",
-        body: `“I’m fine” arrives at 02:14. ${first(e!)}’s Energy is ${e!.attrs.energy}/20${p ? ` and ${first(e!)} is still on ${p.name}` : ""}${onCall ? ", and on call this week" : ""}.`,
-        intents: [
-          {
-            id: "checkin",
-            label: "Book a proper check-in",
-            cost: 1,
-            hints: "Morale ↑ · Reveals a trait or Loyalty",
-            effects: [E.attr(e!.id, "morale", 2), { k: "scout", who: e!.id, d: 1 }],
-            cause: "A real check-in, not a status update",
-          },
-          {
-            id: "offload",
-            label: "Re-plan the critical path without them",
-            cost: 1,
-            hints: p ? `Energy ↑ · Progress ↓` : "Energy ↑",
-            effects: [E.attr(e!.id, "energy", 4), ...(p ? [E.progress(p.id, -6)] : [])],
-            cause: "Moved off the critical path",
-          },
-          {
-            id: "pager",
-            label: "Take them off the pager for a month",
-            cost: 0,
-            hints: "Energy ↑ · On-call Load ↑",
-            effects: [E.attr(e!.id, "energy", 2), E.meter("oncallLoad", 6)],
-            cause: "Off the pager for a month",
-          },
-          {
-            id: "runbook",
-            label: "Pair on the runbook together",
-            cost: 2,
-            hints: "On-call Load ↓ · Debugging ↑",
-            effects: [E.meter("oncallLoad", -8), E.attr(e!.id, "debugging", 1), E.attr(e!.id, "energy", 1)],
-            cause: "Runbook pairing session",
-          },
-        ],
-        ignoreHint: "Energy ↓ · Burnout risk",
-        ignoreEffects: [E.attr(e!.id, "energy", -2), E.attr(e!.id, "morale", -1)],
-        ignoreCause: "Burnout signs went unanswered",
-      };
-    },
-  },
-  {
     id: "poaching",
     cat: "PEOPLE",
     canBeRequired: true,
+    oncePer: "quarter",
     weight: (s) => (s.engineers.length >= 4 ? 2 : 0),
     setup: (ctx, rng) => {
       const pool = by(ctx.s.engineers, (e) => e.attrs.coding + e.attrs.ambition).slice(0, 3);
@@ -222,7 +114,7 @@ export const EVENT_TYPES: EventType[] = [
           hints: "Chance they stay · Reveals a trait or Loyalty",
           effects: [
             { k: "scout", who: e!.id, d: 1 },
-            E.chance(loyaltyOdds(e!, 0.2), "The growth plan landed", [E.loyalty(e!.id, 2)], [E.attr(e!.id, "morale", -2)]),
+            E.chance(loyaltyOdds(e!, 0.2), "The growth plan landed", [E.loyalty(e!.id, 2), E.attr(e!.id, "morale", 1)], [E.attr(e!.id, "morale", -2)]),
           ],
           cause: "A growth conversation",
         },
@@ -239,60 +131,9 @@ export const EVENT_TYPES: EventType[] = [
           cause: "Gracious, but no counter-offer",
         },
       ],
-      ignoreHint: "Loyalty ↓ · Leave risk",
-      ignoreEffects: [E.loyalty(e!.id, -3), E.chance(0.35, "They took the offer", [E.leave(e!.id)])],
+      ignoreHint: "Morale ↓ · Loyalty ↓ · Leave risk",
+      ignoreEffects: [E.attr(e!.id, "morale", -2), E.loyalty(e!.id, -3), E.chance(0.35, "They took the offer", [E.leave(e!.id)])],
       ignoreCause: "Recruiter conversation ignored",
-    }),
-  },
-  {
-    id: "conflict",
-    cat: "PEOPLE",
-    canBeRequired: false,
-    weight: (s) => (s.engineers.length >= 4 ? 2 : 0),
-    setup: (ctx, rng) => {
-      const [a, b] = rng.shuffle(ctx.s.engineers);
-      return a && b ? { ...ctx, subject: a, other: b } : null;
-    },
-    build: ({ subject: a, other: b }) => ({
-      from: a!.name,
-      fromRole: levelTitle(a!),
-      title: `A 40-comment PR thread with ${first(b!)}`,
-      body: `It started as a naming nit. It is now about values. ${first(a!)} and ${first(b!)} have stopped reacting to each other’s Slack messages.`,
-      intents: [
-        {
-          id: "mediate",
-          label: "Get them in a room together",
-          cost: 2,
-          hints: "Morale ↑↑ · Loyalty ↑ · Reveals a trait or Loyalty",
-          effects: [
-            E.attr(a!.id, "morale", 2),
-            E.attr(b!.id, "morale", 2),
-            E.loyalty(a!.id, 1),
-            E.loyalty(b!.id, 1),
-            { k: "scout", who: a!.id, d: 1 },
-          ],
-          cause: "Mediated the PR standoff",
-        },
-        {
-          id: "lint",
-          label: "Adopt a style guide, not a verdict",
-          cost: 1,
-          hints: "Morale ↑ · Tech Debt ↓",
-          effects: [E.attr(a!.id, "morale", 1), E.attr(b!.id, "morale", 1), E.meter("techDebt", -1)],
-          cause: "A lint rule ended the debate",
-        },
-        {
-          id: "rule",
-          label: "Make the call yourself",
-          cost: 0,
-          hints: `${first(a!)} Morale ↑ · ${first(b!)} Morale ↓`,
-          effects: [E.attr(a!.id, "morale", 1), E.attr(b!.id, "morale", -2)],
-          cause: "Manager decided the naming debate",
-        },
-      ],
-      ignoreHint: "Morale ↓ for both",
-      ignoreEffects: [E.attr(a!.id, "morale", -2), E.attr(b!.id, "morale", -2)],
-      ignoreCause: "PR feud left to simmer",
     }),
   },
   {
@@ -348,6 +189,7 @@ export const EVENT_TYPES: EventType[] = [
     id: "underperformer",
     cat: "PEOPLE",
     canBeRequired: false,
+    oncePer: "subject",
     weight: (s) => (s.engineers.some((e) => e.attrs.coding <= 11) ? 2 : 0),
     setup: (ctx) => {
       const e = by(ctx.s.engineers, (x) => -x.attrs.coding)[0];
@@ -397,59 +239,10 @@ export const EVENT_TYPES: EventType[] = [
     }),
   },
   {
-    id: "notice_backfill",
-    cat: "PEOPLE",
-    canBeRequired: true,
-    // Only when someone is genuinely unhappy: low Loyalty and low Morale.
-    weight: (s) =>
-      s.engineers.length >= 4 && s.week >= 3 && !seenThisQuarter(s, "notice_backfill") && s.engineers.some((e) => e.loyalty <= 9 && e.attrs.morale <= 10) ? 1 : 0,
-    setup: (ctx) => {
-      const e = by(
-        ctx.s.engineers.filter((x) => x.loyalty <= 9 && x.attrs.morale <= 10),
-        (x) => -x.loyalty,
-      )[0];
-      return e ? { ...ctx, subject: e } : null;
-    },
-    build: ({ subject: e }) => ({
-      from: e!.name,
-      fromRole: levelTitle(e!),
-      title: "Two weeks’ notice",
-      body: `${first(e!)} gives notice. Finance replies to your backfill request with a calendar invite titled “Headcount philosophy”.`,
-      intents: [
-        {
-          id: "counter",
-          label: "Counter-offer",
-          cost: 2,
-          hints: "Political Capital ↓↓ · Chance they stay",
-          effects: [E.meter("capital", -8), E.chance(loyaltyOdds(e!, 0), "They stayed, for now", [E.loyalty(e!.id, 3)], [E.leave(e!.id)])],
-          cause: "Counter-offer made",
-        },
-        {
-          id: "backfill",
-          label: "Accept it, fight for the backfill",
-          cost: 1,
-          hints: "Political Capital ↓ · Hiring chance",
-          effects: [E.leave(e!.id), E.meter("capital", -4), E.chance(0.5, "Backfill approved", [{ k: "hire" }])],
-          cause: "Accepted the notice, fought for the seat",
-        },
-        {
-          id: "handover",
-          label: "Accept it, two weeks of handover docs",
-          cost: 1,
-          hints: "Tech Debt ↑ · Morale ↑",
-          effects: [E.attr(e!.id, "morale", 2), E.leave(e!.id), E.meter("techDebt", 2)],
-          cause: "A proper handover",
-        },
-      ],
-      ignoreHint: "Tech Debt ↑↑ · Team Morale ↓",
-      ignoreEffects: [E.leave(e!.id), E.meter("techDebt", 8), E.team("morale", -1)],
-      ignoreCause: "Tribal knowledge walked out the door",
-    }),
-  },
-  {
     id: "rto_badge",
     cat: "PEOPLE",
     canBeRequired: false,
+    oncePer: "quarter",
     weight: (s) => (s.engineers.length >= 4 && s.engineers.some((e) => e.loyalty <= 12) ? 1 : 0),
     setup: (ctx) => {
       const e = by(
@@ -604,6 +397,7 @@ export const EVENT_TYPES: EventType[] = [
     id: "estimate_blown",
     cat: "DELIVERY",
     canBeRequired: true,
+    oncePer: "project",
     weight: (s) => (s.week < 3 ? 0 : active(s).some((p) => p.progress < expectedProgress(p, s.week)) ? 4 : 1),
     setup: (ctx) => {
       const ps = active(ctx.s);
@@ -765,6 +559,7 @@ export const EVENT_TYPES: EventType[] = [
     id: "keynote_oneup",
     cat: "DELIVERY",
     canBeRequired: false,
+    oncePer: "quarter",
     weight: (s) =>
       s.company === "Vercel" && s.week < 8 && s.projects.some((p) => p.flagship && p.status === "active") && !seenThisQuarter(s, "keynote_oneup") ? 3 : 0,
     setup: (ctx) => {
@@ -812,6 +607,7 @@ export const EVENT_TYPES: EventType[] = [
     id: "postmortem_name",
     cat: "DELIVERY",
     canBeRequired: false,
+    oncePer: "quarter",
     weight: (s) => (s.company === "Stripe" && s.stats.incidents > 0 && !!s.plan.oncallId && !seenThisQuarter(s, "postmortem_name") ? 2 : 0),
     setup: (ctx) => {
       const e = ctx.s.engineers.find((x) => x.id === ctx.s.plan.oncallId);
@@ -864,74 +660,13 @@ export const EVENT_TYPES: EventType[] = [
       ignoreCause: "The draft went out as it was",
     }),
   },
-  {
-    id: "v2_rewrite",
-    cat: "DELIVERY",
-    canBeRequired: false,
-    weight: (s) =>
-      s.week <= 8 && s.engineers.some((e) => e.attrs.ambition >= 13) && !seenThisQuarter(s, "v2_rewrite") ? 1.5 * (s.company === "Google" ? 1.6 : 1) : 0,
-    setup: (ctx) => {
-      const e = by(
-        ctx.s.engineers.filter((x) => x.attrs.ambition >= 13),
-        (x) => x.attrs.ambition,
-      )[0];
-      return e ? { ...ctx, subject: e, project: projectOf(ctx.s, e) ?? active(ctx.s)[0] } : null;
-    },
-    build: ({ subject: e, project: p, s }) => ({
-      from: e!.name,
-      fromRole: levelTitle(e!),
-      title: "A 14-page doc called “Service v2”",
-      body: `v1 works. Maintaining v1 does not fit in a promo packet. ${first(e!)} has already picked the new framework.`,
-      intents: [
-        {
-          id: "approve",
-          label: "Approve the rewrite",
-          cost: 1,
-          hints: `Morale ↑ · Packet evidence · Tech Debt ↑ · Promise due wk ${Math.min(12, s.week + 4)}`,
-          effects: [
-            E.attr(e!.id, "morale", 3),
-            E.meter("packet", 2),
-            E.meter("techDebt", 6),
-            ...(p ? [E.progress(p.id, -6)] : []),
-            {
-              k: "promise",
-              who: e!.id,
-              text: `${first(e!)}: v2 cuts over and v1 is turned off.`,
-              dueIn: 4,
-              payload: [E.meter("techDebt", -10), E.meter("oncallLoad", 8)],
-              payloadHint: "Tech Debt ↓↓ · On-call Load ↑",
-            },
-          ],
-          cause: "Approved the rewrite",
-        },
-        {
-          id: "migrate",
-          label: "Make it a migration plan with a design review",
-          cost: 2,
-          hints: "Tech Debt ↓ · Packet evidence · Morale ↓",
-          effects: [E.meter("techDebt", -4), E.meter("packet", 1), E.attr(e!.id, "morale", -1)],
-          cause: "Rewrite became a migration plan",
-        },
-        {
-          id: "no",
-          label: "No. Maintenance is the job.",
-          cost: 0,
-          hints: "Morale ↓ · Loyalty risk",
-          effects: [E.attr(e!.id, "morale", -3), E.chance(0.3, "They took it personally", [E.loyalty(e!.id, -3)])],
-          cause: "Said no to v2",
-        },
-      ],
-      ignoreHint: "Tech Debt ↑ · Energy ↓",
-      ignoreEffects: [E.meter("techDebt", 4), E.attr(e!.id, "energy", -2)],
-      ignoreCause: "They built v2 in their 20% time anyway",
-    }),
-  },
 
   /* --------------------------------- POLITICS --------------------------------- */
   {
     id: "quick_deck",
     cat: "POLITICS",
     canBeRequired: true,
+    oncePer: "quarter",
     weight: (s) => 3 * (s.company === "Google" ? 1.3 : 1),
     setup: (ctx) => ctx,
     build: ({ skip }) => ({
@@ -952,8 +687,8 @@ export const EVENT_TYPES: EventType[] = [
           id: "reuse",
           label: "Send the existing weekly update",
           cost: 0,
-          hints: "Time saved · Trust risk",
-          effects: [E.chance(0.5, "Good enough", [], [E.trust("skip", -4)])],
+          hints: "Time saved · Stress ↓ · Trust risk",
+          effects: [E.meter("stress", -1), E.chance(0.5, "Good enough", [], [E.trust("skip", -4)])],
           cause: "Weekly update sent instead",
         },
         {
@@ -974,6 +709,7 @@ export const EVENT_TYPES: EventType[] = [
     id: "ceo_ask",
     cat: "POLITICS",
     canBeRequired: false,
+    oncePer: "quarter",
     weight: (s) => 2 * (s.company === "Vercel" ? 1.5 : 1),
     setup: (ctx) => ({ ...ctx, project: active(ctx.s)[0] }),
     build: ({ project: p }) => ({
@@ -1007,8 +743,8 @@ export const EVENT_TYPES: EventType[] = [
           cause: "Throwaway agent prototype",
         },
       ],
-      ignoreHint: "May fade away · Trust risk",
-      ignoreEffects: [E.chance(0.7, "Quietly forgotten", [], [E.trust("skip", -4)])],
+      ignoreHint: "Political Capital ↓ · May fade away · Trust risk",
+      ignoreEffects: [E.meter("capital", -2), E.chance(0.7, "Quietly forgotten", [], [E.trust("skip", -4)])],
       ignoreCause: "CEO ask left unanswered",
     }),
   },
@@ -1055,142 +791,10 @@ export const EVENT_TYPES: EventType[] = [
     }),
   },
   {
-    id: "reorg_rumor",
-    cat: "POLITICS",
-    canBeRequired: false,
-    weight: (s) => (s.week >= 3 ? 2 : 0),
-    setup: (ctx) => ctx,
-    build: ({ skip }) => ({
-      from: "#random",
-      fromRole: "Slack, 34 replies",
-      title: "Is there a reorg?",
-      body: "Someone saw a calendar invite titled “Org design (confidential)”. The team is now doing org design of its own, in threads.",
-      intents: [
-        {
-          id: "reassure",
-          label: "Tell the team at standup there’s nothing to it",
-          cost: 1,
-          hints: "Team Morale ↑ · Reputation risk",
-          effects: [E.chance(0.7, "It really was nothing", [E.team("morale", 1)], [E.team("morale", -2), E.meter("reputation", -1)])],
-          cause: "Reorg rumor addressed at standup",
-        },
-        {
-          id: "ask",
-          label: `Ask ${skip.name.split(" ")[0]} directly`,
-          cost: 1,
-          hints: "Skip Trust ↑ · Political Capital ↓",
-          effects: [E.trust("skip", 2), E.meter("capital", -2)],
-          cause: "Asked the skip-level directly",
-        },
-      ],
-      ignoreHint: "Team Morale ↓",
-      ignoreEffects: [E.team("morale", -1)],
-      ignoreCause: "Reorg rumor left to the threads",
-    }),
-  },
-  {
-    id: "layoff_list",
-    cat: "POLITICS",
-    canBeRequired: true,
-    weight: (s) =>
-      s.week >= 4 && s.week <= 10 && s.engineers.length >= 4 && !seenThisQuarter(s, "layoff_list") ? 0.5 * (s.company === "Google" ? 1.5 : 1) : 0,
-    setup: (ctx) => {
-      const low = by(ctx.s.engineers, (e) => -e.attrs.coding)[0];
-      const pricey = by(
-        ctx.s.engineers.filter((e) => e !== low),
-        (e) => e.level,
-      )[0];
-      return low && pricey ? { ...ctx, subject: low, other: pricey } : null;
-    },
-    build: ({ subject: low, other: pricey, skip }) => ({
-      from: skip.name,
-      fromRole: "Skip-level · confidential",
-      title: "The spreadsheet has a column called “Impact if removed”",
-      body: "You need to stack-rank your team and draw a line by Friday. It is “not a layoff list”.",
-      intents: [
-        {
-          id: "rank",
-          label: "Rank honestly and draw the line",
-          cost: 2,
-          hints: `Skip Trust ↑ · ${first(low!)} leaves · Team Morale ↓`,
-          effects: [E.leave(low!.id), E.trust("skip", 4), E.team("morale", -1)],
-          cause: "Drew the line on the spreadsheet",
-        },
-        {
-          id: "fight",
-          label: "Fight for zero cuts",
-          cost: 2,
-          hints: "Political Capital ↓↓ · Coin flip",
-          effects: [E.meter("capital", -10), E.chance(0.45, "Zero cuts held", [], [E.leave(low!.id), E.trust("skip", -4)])],
-          cause: "Fought for zero cuts",
-        },
-        {
-          id: "warn",
-          label: "Warn the team first",
-          cost: 1,
-          hints: `Team Morale ↑ · Skip Trust ↓↓ · ${first(low!)} leaves`,
-          effects: [E.leave(low!.id), E.team("morale", 1), E.trust("skip", -8)],
-          cause: "Warned the team before the list",
-        },
-      ],
-      ignoreHint: `Skip Trust ↓ · ${first(pricey!)} leaves`,
-      ignoreEffects: [E.leave(pricey!.id), E.trust("skip", -6)],
-      ignoreCause: "Finance drew the line for you",
-    }),
-  },
-  {
-    id: "calibration_trade",
-    cat: "POLITICS",
-    canBeRequired: false,
-    weight: (s) => (s.week >= 9 && s.engineers.length >= 2 && !seenThisQuarter(s, "calibration_trade") ? 1.5 * (s.company === "Google" ? 1.8 : 1) : 0),
-    setup: (ctx) => {
-      const [a, b] = by(ctx.s.engineers, (e) => e.attrs.coding);
-      return a && b ? { ...ctx, subject: a, other: b } : null;
-    },
-    build: ({ subject: a, other: b, peer }) => ({
-      from: "Calibration",
-      fromRole: "Room 4B, no laptops",
-      title: "One Exceeds, two people who earned it",
-      body: `${first(a!)} and ${first(b!)} both had a great half. ${peer.name.split(" ")[0]}’s report also “had a great half”, according to ${peer.name.split(" ")[0]}.`,
-      intents: [
-        {
-          id: "allin",
-          label: `Go all-in for ${first(a!)}`,
-          cost: 1,
-          hints: `${first(a!)} Morale ↑ · ${first(b!)} Morale ↓`,
-          effects: [E.attr(a!.id, "morale", 3), E.loyalty(a!.id, 2), E.attr(b!.id, "morale", -3)],
-          cause: `Went all-in for ${first(a!)}`,
-        },
-        {
-          id: "both",
-          label: "Fight for both",
-          cost: 2,
-          hints: "Political Capital ↓ · Peer Trust ↓ · Coin flip",
-          effects: [
-            E.meter("capital", -8),
-            E.trust("peer", -3),
-            E.chance(0.4, "Both got it", [E.attr(a!.id, "morale", 2), E.attr(b!.id, "morale", 2)], [E.attr(a!.id, "morale", -1), E.attr(b!.id, "morale", -1)]),
-          ],
-          cause: "Fought for both in calibration",
-        },
-        {
-          id: "trade",
-          label: "Trade the slot for a favor",
-          cost: 1,
-          hints: "Peer Trust ↑ · Political Capital ↑ · Morale ↓",
-          effects: [E.trust("peer", 6), E.meter("capital", 4), E.attr(a!.id, "morale", -2), E.attr(b!.id, "morale", -2)],
-          cause: "Traded the Exceeds for a favor",
-        },
-      ],
-      ignoreHint: "Morale ↓ for both",
-      ignoreEffects: [E.attr(a!.id, "morale", -2), E.attr(b!.id, "morale", -2), E.meter("packet", -1)],
-      ignoreCause: "Calibrated by people who’ve never met them",
-    }),
-  },
-  {
     id: "ai_mandate",
     cat: "POLITICS",
     canBeRequired: true,
+    oncePer: "quarter",
     weight: (s) => (s.week >= 2 && !seenThisQuarter(s, "ai_mandate") ? 1.5 : 0),
     setup: (ctx) => {
       const e = by(ctx.s.engineers, (x) => x.attrs.coding)[0];
@@ -1236,6 +840,7 @@ export const EVENT_TYPES: EventType[] = [
     id: "skip_feedback",
     cat: "POLITICS",
     canBeRequired: false,
+    oncePer: "quarter",
     weight: (s) => (s.week >= 3 && !seenThisQuarter(s, "skip_feedback") ? 1.5 : 0),
     setup: (ctx) => ctx,
     build: ({ skip }) => ({

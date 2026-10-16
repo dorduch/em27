@@ -30,6 +30,8 @@ export function newQuarter(s: GameState): GameState {
     d.pendingOffer = null;
     d.offers = [];
     d.packet = d.company === "Google" ? Math.floor(d.packet / 2) : 0;
+    // Last quarter's hires have settled in (and can now ask about promotion).
+    for (const e of d.engineers) if (e.tenure === "new") e.tenure = "3mo";
     if (d.level !== "Director") {
       const max = TEAM_SIZE[d.level];
       const used = new Set(d.engineers.map((e) => e.name));
@@ -189,6 +191,8 @@ export function startNewJob(s: GameState): GameState {
     // Promises made to the squad you leave behind lapse; they count as broken.
     d.stats.promisesBroken += d.facts.filter((f) => f.status === "open").length;
     d.facts = [];
+    // A new team: storylines about the old one end here.
+    d.arcs = [];
     d.plan.oncallId = null;
     d.history.push({ quarter: d.quarter, company: d.company, level, grade: "New role" });
   });

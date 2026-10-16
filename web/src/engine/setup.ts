@@ -137,6 +137,8 @@ export function newGame(company: CompanyId, seed: number): GameState {
     capacity: BASE_SLOTS.EM,
     recentTypes: [],
     quarterEvents: [],
+    arcs: [],
+    arcHistory: [],
     directorPlan: null,
     inboxSource: { by: "random" },
     pendingPostmortem: null,

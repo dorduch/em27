@@ -2,7 +2,8 @@
 // It never changes mechanics: it only picks candidate ids, and the engine validates them.
 
 import { expectedProgress } from "@/content/events";
-import { candidatePool, rememberTypes, REGULAR_ITEMS, validatePlan } from "./inbox";
+import { STORYLINES } from "@/content/storylines";
+import { candidatePool, now, regularQuota, rememberTypes, settleArcs, validatePlan } from "./inbox";
 import { produce } from "./plan";
 import type { DirectorPlan, GameState } from "./types";
 
@@ -17,6 +18,8 @@ export interface DirectorCandidate {
   type: string;
   category: string;
   canBeMustRespond: boolean;
+  /** Picking this candidate opens a multi-week storyline about this person. */
+  opensStoryline: boolean;
   title: string;
   from: string;
   /** The engineer the demand is about, if any, with the numbers that matter. */
@@ -38,6 +41,8 @@ export interface DirectorBrief {
   openPromises: { text: string; dueWeek: number }[];
   lastWeek: { good: boolean; biggestChanges: string[] } | null;
   recentEventTypes: string[];
+  /** Storylines already running. Their next beats are scheduled by the engine, not picked. */
+  storylines: { title: string; person: string; beat: string; dueThisWeek: boolean }[];
   midQuarterFocus: string | null;
   candidates: DirectorCandidate[];
 }
@@ -48,14 +53,13 @@ export function directorBrief(s: GameState): DirectorBrief | null {
   const next = nextWeekPreview(s);
   if (!next) return null;
   const pool = candidatePool(next);
-  const types = new Set(pool.map((c) => c.type.id)).size;
   const projectName = (id: string | null) => next.projects.find((p) => p.id === id)?.name ?? null;
   return {
     quarter: next.quarter,
     week: next.week,
     company: next.company,
     level: next.level,
-    pick: Math.min(REGULAR_ITEMS[next.level], types),
+    pick: regularQuota(next, pool),
     projects: next.projects.map((p) => ({
       name: p.name,
       percent: Math.round((p.progress / p.scope) * 100),
@@ -85,6 +89,12 @@ export function directorBrief(s: GameState): DirectorBrief | null {
         }
       : null,
     recentEventTypes: next.recentTypes,
+    storylines: settleArcs(next).arcs.map((a) => ({
+      title: STORYLINES.find((x) => x.id === a.storyline)?.title ?? a.storyline,
+      person: next.engineers.find((e) => e.id === a.subjectId)?.name ?? "",
+      beat: a.beat,
+      dueThisWeek: a.due <= now(next),
+    })),
     midQuarterFocus: next.checkinFocus === null ? null : FOCUS[next.checkinFocus],
     candidates: pool.map((c) => {
       const body = c.type.build(c.ctx);
@@ -94,6 +104,7 @@ export function directorBrief(s: GameState): DirectorBrief | null {
         type: c.type.id,
         category: c.type.cat,
         canBeMustRespond: c.type.canBeRequired,
+        opensStoryline: !!c.storyline,
         title: body.title,
         from: body.from,
         person: e ? { name: e.name, morale: e.attrs.morale, energy: e.attrs.energy } : null,

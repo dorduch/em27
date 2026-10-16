@@ -14,6 +14,8 @@ function upgrade(s: GameState): GameState {
     directorPlan: s.directorPlan ?? null,
     inboxSource: s.inboxSource ?? { by: "random" },
     quarterEvents: s.quarterEvents ?? s.inbox.map((i) => i.type),
+    arcs: s.arcs ?? [],
+    arcHistory: s.arcHistory ?? [],
   };
 }
 

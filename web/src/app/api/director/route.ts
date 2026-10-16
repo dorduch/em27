@@ -18,6 +18,7 @@ Each week the player gets a handful of "demands" (events) and a limited calendar
 Aim for a quarter that feels like a story:
 - Pacing over 12 weeks: weeks 1-2 settle in, 3-5 build pressure, week 6 is the mid-quarter check-in, 7-10 escalate, 11-12 are the crunch before the review. After a bad week, ease off slightly; after calm weeks, raise the stakes.
 - Respond to the player: lean on their weak spots (low trust, a project behind schedule, a tired engineer, a promise coming due) so their choices matter.
+- Storylines: a candidate with opensStoryline=true starts a multi-week arc about that person (a promotion push, a burnout). Running storylines are listed in the brief; their beats arrive on their own. Pick at most one opensStoryline candidate per week, and only when the quarter needs a new thread.
 - Spread the load: avoid picking two candidates about the same person (candidate.person or candidate.from) in one week.
 - Variety: mix categories (PEOPLE, DELIVERY, POLITICS) and avoid event types in recentEventTypes unless there's a strong story reason.
 - Must-respond: choose exactly one picked candidate with canBeMustRespond=true as the must-respond demand: the one with the highest stakes this week.
