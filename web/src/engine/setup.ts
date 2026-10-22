@@ -23,9 +23,11 @@ const clamp = (v: number, lo = 1, hi = 20) => Math.max(lo, Math.min(hi, v));
 
 export function makeEngineer(rng: Rng, id: string, usedNames: Set<string>): Engineer {
   // First names stay unique within a squad so commentary like "Theo and Jonah" is unambiguous.
+  // Surnames too: two Lindqvists on a six-person team reads as a bug, not a coincidence.
   const usedFirst = new Set([...usedNames].map((n) => n.split(" ")[0]));
+  const usedLast = new Set([...usedNames].map((n) => n.split(" ")[1]));
   let name = "";
-  for (let i = 0; i < 80 && (!name || usedNames.has(name) || usedFirst.has(name.split(" ")[0])); i++) {
+  for (let i = 0; i < 80 && (!name || usedNames.has(name) || usedFirst.has(name.split(" ")[0]) || usedLast.has(name.split(" ")[1])); i++) {
     name = `${rng.pick(FIRST_NAMES)} ${rng.pick(LAST_NAMES)}`;
   }
   usedNames.add(name);
@@ -70,8 +72,13 @@ export function makeProjects(
   company: CompanyId,
   level: Exclude<Level, "Director">,
   idBase: number,
+  exclude: string[] = [],
+  scope = 100,
 ): Project[] {
-  const names = rng.shuffle(COMPANIES[company].projectNames);
+  // Fresh names each quarter: last quarter's projects shipped (or died), they don't come back.
+  const pool = COMPANIES[company].projectNames;
+  const unused = pool.filter((n) => !exclude.includes(n));
+  const names = rng.shuffle(unused.length >= PROJECTS[level] ? unused : pool);
   const owners: StakeholderRole[] = ["pm", "skip", "peer", "skip"];
   // Staggered deadlines so the quarter has rhythm. Vercel's flagship is pinned to the keynote.
   const dues = level === "EM" ? [6, 9, 12] : [5, 8, 10, 12];
@@ -79,7 +86,7 @@ export function makeProjects(
     id: `p${idBase + i}`,
     name: names[i],
     owner: owners[i],
-    scope: 100,
+    scope,
     progress: 0,
     startWeek: 1,
     dueWeek: dues[i],
@@ -88,6 +95,32 @@ export function makeProjects(
   }));
   if (company === "Vercel") projects[0].dueWeek = KEYNOTE_WEEK;
   return projects;
+}
+
+/** No follow-on after this week: there would be too little quarter left to do it. */
+export const FOLLOW_ON_LAST_WEEK = 9;
+
+/**
+ * The next thing on the backlog, arriving the Monday after `shipped` ships. A stretch goal: sized to the
+ * weeks left, due at quarter end, and it only counts toward Delivery if shipping it helps.
+ */
+export function makeFollowOn(rng: Rng, company: CompanyId, shipped: Project, week: number, taken: string[], id: string, weekly: number): Project | null {
+  const names = COMPANIES[company].projectNames.filter((n) => !taken.includes(n));
+  if (!names.length || week > FOLLOW_ON_LAST_WEEK) return null;
+  // Sized so the team that rolls onto it can just about finish by week 12: a stretch, not a lost cause.
+  const scope = Math.round(Math.max(30, Math.min(80, weekly * (12 - week) * 0.9)) / 5) * 5;
+  return {
+    id,
+    name: rng.pick(names),
+    owner: shipped.owner,
+    scope,
+    progress: 0,
+    startWeek: week + 1,
+    dueWeek: 12,
+    flagship: false,
+    status: "active",
+    stretch: true,
+  };
 }
 
 /** Spread engineers across projects, strongest coders first. */

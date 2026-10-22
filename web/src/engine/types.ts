@@ -49,6 +49,7 @@ export interface Engineer {
   revealed: Trait[];
   scout: number; // accumulated 1:1 discovery progress
   projectId: string | null;
+  awayFrom?: string; // the project they stepped off for a loan or a week off, so they can go back to it
   log: Cause[]; // most recent first, trimmed
 }
 
@@ -62,6 +63,8 @@ export interface Project {
   dueWeek: number;
   flagship: boolean;
   status: "active" | "shipped" | "late-shipped" | "missed";
+  /** A follow-on that arrived mid-quarter: it can only raise the delivery score, and it never misses. */
+  stretch?: boolean;
 }
 
 export interface Stakeholder {
@@ -108,9 +111,12 @@ export type Effect =
   | { k: "keep"; factId: string }
   | { k: "break"; factId: string }
   | { k: "scout"; who: string; d: number }
-  | { k: "leave"; who: string }
+  | { k: "leave"; who: string; how?: "quit" | "cut" | "transfer" }
+  | { k: "away"; who: string } // steps off their project and the pager for a while (a loan, a week off)
+  | { k: "assign"; who: string; project: string } // put someone (back) on an active project
   | { k: "hire" }
-  | { k: "chance"; p: number; then: Effect[]; else?: Effect[]; note: string }
+  | { k: "settle"; type: string } // the situation behind an event type is dealt with: it won't come back this quarter
+  | { k: "chance"; p: number; then: Effect[]; else?: Effect[]; note: string; miss?: string } // miss: narrated when the roll fails
   | { k: "teamAttr"; attr: AttrKey; d: number }
   | { k: "levelUp"; who: string }
   // Storyline effects: only act when the item belongs to a storyline.
@@ -222,6 +228,8 @@ export interface WeekResult {
   recap: string;
   good: boolean;
   keynote?: "shipped" | "missed";
+  /** This week's pager: who carried it when it fired, and whether it escalated to you. */
+  incident?: { oncallId: string | null; escalated: boolean };
   projects?: ProjectWeek[]; // absent in saves from before this field existed
 }
 

@@ -3,7 +3,7 @@
 import { COMPANIES, KEYNOTE_WEEK } from "@/content/companies";
 import { TRAIT_LABEL } from "@/content/people";
 import { beatCtx, storylineById } from "@/content/storylines";
-import { baseCtx, fillInbox, now, rememberTypes } from "./inbox";
+import { baseCtx, fillInbox, now, rememberTypes, settledKey } from "./inbox";
 import {
   capacityFor,
   FOCUS_RELIEF,
@@ -12,8 +12,9 @@ import {
   produce,
   WEEKLY_STRESS_DECAY,
 } from "./plan";
+import { forecast } from "./forecast";
 import { makeRng, type Rng } from "./rng";
-import { makeEngineer, TEAM_SIZE } from "./setup";
+import { makeEngineer, makeFollowOn, TEAM_SIZE } from "./setup";
 import type {
   ArcState,
   AttrKey,
@@ -60,6 +61,7 @@ export function engineerOutput(e: Engineer, techDebt: number): number {
 
 class Resolver {
   causes: Cause[] = [];
+  departures: { name: string; how: "quit" | "cut" | "transfer" }[] = [];
   lines: FridayLine[] = [];
   hires = 0;
   minute = 9 * 60 + 5;
@@ -133,14 +135,26 @@ class Resolver {
     return null;
   }
 
-  leave(e: Engineer, why: string) {
+  leave(e: Engineer, why: string, how: "quit" | "cut" | "transfer" = "quit") {
     this.d.engineers = this.d.engineers.filter((x) => x.id !== e.id);
     this.d.departuresThisQuarter += 1;
     this.d.stats.departed.push(e.name);
-    if (this.d.plan.oncallId === e.id) this.d.plan.oncallId = null;
+    this.departures.push({ name: e.name, how });
     this.cause(`${first(e)} left the team`, -1, why);
-    this.line(`${e.name} hands in their notice. <b class="bad">Headcount −1.</b>`, why, "bad");
+    const said = how === "cut" ? "is cut in the reorg" : how === "transfer" ? "transfers to another team" : "hands in their notice";
+    this.line(`${e.name} ${said}. <b class="bad">Headcount −1.</b>`, why, "bad");
+    this.handOffPager(e);
     for (const o of this.d.engineers) this.attr(o, "morale", -1, `${first(e)} left`);
+  }
+
+  /** Whoever carried the pager is gone or away: the best-rested strong debugger picks it up, so it is never silently empty. */
+  handOffPager(from: Engineer) {
+    if (this.d.plan.oncallId !== from.id) return;
+    const next = this.d.engineers
+      .filter((x) => x.id !== from.id)
+      .sort((a, b) => b.attrs.debugging + b.attrs.energy - (a.attrs.debugging + a.attrs.energy))[0];
+    this.d.plan.oncallId = next?.id ?? null;
+    if (next) this.line(`${first(next)} picks up the pager from ${first(from)}.`, "On-call hand-off", undefined);
   }
 
   endArc(arc: ArcState, outcome: string) {
@@ -238,12 +252,34 @@ class Resolver {
         }
         case "leave": {
           const e = this.eng(ef.who);
-          if (e) this.leave(e, why);
+          if (e) this.leave(e, why, ef.how);
+          break;
+        }
+        case "assign": {
+          const e = this.eng(ef.who);
+          if (e && this.d.projects.some((p) => p.id === ef.project && p.status === "active")) {
+            e.projectId = ef.project;
+            delete e.awayFrom;
+          }
+          break;
+        }
+        case "away": {
+          const e = this.eng(ef.who);
+          if (e) {
+            if (e.projectId) e.awayFrom = e.projectId;
+            e.projectId = null;
+            this.handOffPager(e);
+          }
           break;
         }
         case "hire":
           this.hires++;
           break;
+        case "settle": {
+          const key = settledKey(ef.type);
+          if (!this.d.quarterEvents.includes(key)) this.d.quarterEvents.push(key);
+          break;
+        }
         case "levelUp": {
           const e = this.eng(ef.who);
           if (e && e.level < 7) {
@@ -272,6 +308,7 @@ class Resolver {
         case "chance": {
           const hit = this.rng.chance(ef.p);
           if (hit) notes.push(ef.note.toLowerCase());
+          else if (ef.miss) notes.push(ef.miss.toLowerCase());
           notes.push(...this.apply(hit ? ef.then : (ef.else ?? []), why));
           break;
         }
@@ -289,8 +326,15 @@ const GOOD_HEADLINES = [
 const BAD_HEADLINES = [
   "Everything was on fire.<br>Including the roadmap.",
   "“Let’s take the learnings<br>into next week.”",
-  "The calendar had opinions.<br>So did the pager.",
+  "The calendar had opinions.<br>Nobody asked the calendar.",
 ];
+
+/** The front page says how someone left: a resignation, a cut and a transfer are different stories. */
+function departureHeadline(d: { name: string; how: "quit" | "cut" | "transfer" }): string {
+  if (d.how === "cut") return `${d.name}’s role is cut.<br>The spreadsheet had a column for it.`;
+  if (d.how === "transfer") return `${d.name} transfers out.<br>Their new team ships on Fridays.`;
+  return `${d.name} resigns.<br>The calendar invite says “Catch up :)”.`;
+}
 
 export function resolveWeek(s: GameState): GameState {
   if (s.phase !== "plan") return s;
@@ -300,7 +344,6 @@ export function resolveWeek(s: GameState): GameState {
     const used = planCost(s);
     const cap = s.capacity;
     let keynote: WeekResult["keynote"];
-    const departedBefore = d.stats.departed.length;
     r.line("The plan is locked. The calendar has opinions.", `Week ${d.week} · ${used}/${cap} slots booked`);
 
     // 1. Inbox decisions. Unanswered optional items resolve as ignored.
@@ -350,8 +393,11 @@ export function resolveWeek(s: GameState): GameState {
       if (r.arc && !r.arcMoved && d.arcs.includes(r.arc)) r.endArc(r.arc, "faded");
       r.arc = undefined;
     }
-    // 1b. Storylines still open wear on people while they wait.
+    if (calls.length) r.line(`Your calls: ${calls.join("; ")}.`, "Your decisions → applied");
+    // 1b. Storylines still open wear on people while they wait. One you just answered doesn't.
+    const answered = new Set(s.inbox.map((i) => i.arc?.id).filter(Boolean));
     for (const arc of [...d.arcs]) {
+      if (answered.has(arc.id)) continue;
       const sl = storylineById(arc.storyline);
       const ctx = sl?.simmer && beatCtx(baseCtx(d), arc);
       const cost = ctx && sl.simmer!(ctx, arc.beat);
@@ -359,7 +405,6 @@ export function resolveWeek(s: GameState): GameState {
       r.apply(cost.effects, cost.why);
       r.line(`${cost.why}.`, `${sl.title} → still unresolved`, "bad");
     }
-    if (calls.length) r.line(`Your calls: ${calls.join("; ")}.`, "Your decisions → applied");
     if (slid.length) r.line(`Let slide: ${slid.join("; ")}.`, "Ignored, no immediate cost");
 
     // 2. 1:1s: morale and scouting.
@@ -402,7 +447,8 @@ export function resolveWeek(s: GameState): GameState {
       gains[p.id] = { gain: p.progress - before, team: team.length };
       if (team.length) {
         r.cause(`${p.name} progress`, p.progress - before, `${team.map(first).join(" + ")} on the work`);
-        const onTrack = p.progress >= Math.round((p.scope * Math.min(1, (d.week - p.startWeek + 1) / (p.dueWeek - p.startWeek + 1))));
+        // The same forecast the Projects screen shows, from next week at today's staffing.
+        const onTrack = p.progress >= p.scope || forecast(p, d.engineers, d.techDebt, d.week + 1).kind === "on-track";
         r.line(
           `${p.name}: ${team.map(first).join(" and ")} add ${p.progress - before} points. <b class="${onTrack ? "good" : "bad"}">${onTrack ? "On track." : "Behind."}</b>`,
           "Staffing → delivery",
@@ -428,13 +474,26 @@ export function resolveWeek(s: GameState): GameState {
         r.meter("reputation", 2, `${p.name} shipped`);
         r.meter("capital", 4, `${p.name} shipped`);
         r.meter("packet", 3, `${p.name} launch evidence`);
-        for (const e of d.engineers.filter((x) => x.projectId === p.id)) {
+        const team = d.engineers.filter((x) => x.projectId === p.id);
+        for (const e of team) {
           e.projectId = null;
           r.attr(e, "morale", 2, `${p.name} shipped`);
         }
         shippedNames.push(p.name);
         r.line(`${p.name} ships${late ? ", late" : ""}. <b class="good">Released.</b>`, "Delivery → Trust and Reputation", "good");
-      } else if (d.week >= p.dueWeek) {
+        // The backlog refills: the same team rolls onto the next thing, as a stretch goal.
+        const weekly = team.reduce((n, e) => n + engineerOutput(e, d.techDebt), 0);
+        const next = makeFollowOn(rng, d.company, p, d.week, d.projects.map((x) => x.name), `p${d.nextId++}`, weekly);
+        if (next) {
+          d.projects.push(next);
+          for (const e of team) e.projectId = next.id;
+          const owner = d.stakeholders.find((x) => x.role === next.owner)!;
+          r.line(
+            `Next up from ${owner.name.split(" ")[0]}: ${next.name}. ${team.length ? `${team.map(first).join(" and ")} roll onto it. ` : ""}A stretch goal, due week ${next.dueWeek}.`,
+            "Shipped → the backlog refills",
+          );
+        }
+      } else if (d.week >= p.dueWeek && !p.stretch) {
         p.status = "missed";
         r.trust(p.owner, -8, `${p.name} missed its date`);
         r.meter("reputation", -3, `${p.name} missed its date`);
@@ -460,11 +519,13 @@ export function resolveWeek(s: GameState): GameState {
 
     // 5. On-call and incidents.
     let escalated = false;
+    let incident: WeekResult["incident"];
     const oncall = d.plan.oncallId ? r.eng(d.plan.oncallId) : undefined;
     if (oncall) r.attr(oncall, "energy", -1, "On call this week");
     const pIncident = COMPANIES[d.company].incidentBase + d.techDebt / 250 + d.oncallLoad / 400;
     if (rng.chance(pIncident)) {
       d.stats.incidents++;
+      incident = { oncallId: oncall?.id ?? null, escalated: false };
       const who = oncall ? `${first(oncall)} is on call (Debugging ${oncall.attrs.debugging}, Energy ${oncall.attrs.energy})` : "Nobody is on call";
       r.line(`PagerDuty fires. ${who}…`, "Incident roll · Tech Debt and On-call Load raise the odds", undefined, 15);
       const pFix = oncall ? 0.3 + (oncall.attrs.debugging / 20) * 0.5 + (oncall.attrs.energy / 20) * 0.15 : 0;
@@ -482,7 +543,8 @@ export function resolveWeek(s: GameState): GameState {
         if (oncall) r.attr(oncall, "energy", -3, "Three-hour incident");
         if (stripe) d.pendingPostmortem = { role: "skip", hit };
         escalated = true;
-        r.line(`…it escalates to you. Rollback takes three hours. <b class="bad">Tech Debt +3.</b>`, oncall ? "On-call mismatch → longer recovery" : "No one on call → long recovery", "bad");
+        incident!.escalated = true;
+        r.line(`…it escalates to you. Rollback takes three hours. <b class="bad">Tech Debt +3.</b>`, oncall ? "Fix roll missed → long recovery" : "No one on call → long recovery", "bad");
       }
     } else {
       r.meter("oncallLoad", -3, "A quiet week on the pager");
@@ -519,15 +581,14 @@ export function resolveWeek(s: GameState): GameState {
     const goodN = r.lines.filter((l) => l.tone === "good").length;
     const badN = r.lines.filter((l) => l.tone === "bad").length;
     const good = goodN >= badN;
-    const leftThisWeek = d.stats.departed.slice(departedBefore);
     // The headline reports what actually happened, most newsworthy first.
     const headline =
       keynote === "shipped"
         ? `On stage, on time.<br>${flagship!.name} is live.`
         : keynote === "missed"
           ? "An empty stage.<br>A very full Slack."
-          : leftThisWeek.length
-            ? `${leftThisWeek[0]} resigns.<br>The calendar invite says “Catch up :)”.`
+          : r.departures.length
+            ? departureHeadline(r.departures[0])
             : shippedNames.length
               ? `${shippedNames[0]} ships.<br>${escalated ? "The pager had notes." : "Nobody cried. Mostly."}`
               : missedNames.length
@@ -561,6 +622,7 @@ export function resolveWeek(s: GameState): GameState {
         : `${badN} things went wrong this week. Someone has already scheduled a retro about the retro.`,
       good,
       keynote,
+      incident,
       projects,
     };
     d.phase = "friday";

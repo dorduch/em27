@@ -25,7 +25,7 @@ export const COMPANIES: Record<CompanyId, CompanyDef> = {
       "A fast-moving developer-tools startup. Launch-driven, conference deadlines, priorities that swing with social media.",
     incidentBase: 0.22,
     politics: 0.8,
-    projectNames: ["Checkout v2", "Edge config", "Preview comments", "Build cache", "Usage dashboard"],
+    projectNames: ["Checkout v2", "Edge config", "Preview comments", "Build cache", "Usage dashboard", "Image optimizer", "Log drains", "Spend alerts", "Domain transfers", "Cron jobs", "Firewall rules", "Team SSO"],
     salary: { EM: 195000, "Senior EM": 240000 },
   },
   Stripe: {
@@ -38,7 +38,7 @@ export const COMPANIES: Record<CompanyId, CompanyDef> = {
       "A payments scale-up with a strong writing culture. High bar, long docs, reliability treated as sacred.",
     incidentBase: 0.26,
     politics: 1,
-    projectNames: ["API migration", "Ledger rewrite", "Payouts v3", "Risk rules", "Dashboard search"],
+    projectNames: ["API migration", "Ledger rewrite", "Payouts v3", "Risk rules", "Dashboard search", "Webhook retries", "Tax reports", "Card issuing", "Dispute flow", "Idempotency keys", "Payout schedules", "Fraud signals"],
     salary: { EM: 205000, "Senior EM": 255000 },
   },
   Google: {
@@ -51,7 +51,7 @@ export const COMPANIES: Record<CompanyId, CompanyDef> = {
       "A very large tech company. Process-heavy, promo-driven, design-doc reviews, consensus across many teams.",
     incidentBase: 0.2,
     politics: 1.3,
-    projectNames: ["Build reliability", "Quota service", "Launch checklist", "Search infra", "Cross-team platform"],
+    projectNames: ["Build reliability", "Quota service", "Launch checklist", "Search infra", "Cross-team platform", "Monorepo migration", "Latency budget", "Privacy review tool", "Config rollout", "Shared design system", "Capacity planner", "Experiment framework"],
     salary: { EM: 215000, "Senior EM": 270000 },
   },
 };

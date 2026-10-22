@@ -31,6 +31,15 @@ function reacts(effects: Effect[]): boolean {
   });
 }
 
+/** A failed roll that changes visible numbers must say so on Friday (its miss note); otherwise the change has no story. */
+function silentMiss(effects: Effect[]): boolean {
+  return effects.some(
+    (e) =>
+      e.k === "chance" &&
+      ((!e.miss && (e.else ?? []).some((x) => !["arc", "arcEnd", "arcFlag", "loyalty", "scout", "leave", "hire", "settle"].includes(x.k))) || silentMiss([...e.then, ...(e.else ?? [])])),
+  );
+}
+
 /** A spread of realistic states: every company, several seeds, weeks 1–12. */
 function states(): GameState[] {
   const out: GameState[] = [];
@@ -80,10 +89,12 @@ describe("storylines", () => {
               for (const seg of segs) expect(classifyHint(seg), `${sl.id}.${id}: ${seg}`).not.toBe("unknown");
               for (const i of body.intents) {
                 expect(reacts(i.effects), `${sl.id}.${id}/${i.id} changes nothing`).toBe(true);
+                expect(silentMiss(i.effects), `${sl.id}.${id}/${i.id} fails silently`).toBe(false);
                 expect(continues(i.effects), `${sl.id}.${id}/${i.id} neither continues nor ends`).toBe(true);
                 for (const t of targets(i.effects)) expect(sl.beats[t], `${sl.id}.${id} → ${t}`).toBeDefined();
               }
               expect(reacts(body.ignoreEffects), `${sl.id}.${id}/ignore changes nothing`).toBe(true);
+              expect(silentMiss(body.ignoreEffects), `${sl.id}.${id}/ignore fails silently`).toBe(false);
               expect(continues(body.ignoreEffects), `${sl.id}.${id}/ignore neither continues nor ends`).toBe(true);
             }
           }
@@ -99,8 +110,8 @@ describe("storylines", () => {
         const ctx = t.setup(ctxFor(s), makeRng(1, t.id));
         if (!ctx) continue;
         const body = t.build(ctx);
-        for (const i of body.intents) if (!reacts(i.effects)) silent.add(`${t.id}/${i.id}`);
-        if (!reacts(body.ignoreEffects)) silent.add(`${t.id}/ignore`);
+        for (const i of body.intents) if (!reacts(i.effects) || silentMiss(i.effects)) silent.add(`${t.id}/${i.id}`);
+        if (!reacts(body.ignoreEffects) || silentMiss(body.ignoreEffects)) silent.add(`${t.id}/ignore`);
       }
     }
     expect([...silent].sort()).toEqual([]);

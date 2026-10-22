@@ -297,10 +297,14 @@ describe("AI director", () => {
     const brief = directorBrief(s)!;
     const byType = new Map<string, string>();
     let opening = false;
+    // A legal plan: one demand per person, nobody whose storyline beat is due, one new storyline.
+    const taken = new Set(brief.storylines.filter((x) => x.dueThisWeek).map((x) => x.person));
     // Must-respond-capable candidates first, so the plan has one to mark.
     for (const c of [...brief.candidates].sort((x, y) => Number(y.canBeMustRespond) - Number(x.canBeMustRespond))) {
-      if (byType.has(c.type) || (c.opensStoryline && opening)) continue;
+      const who = [c.person?.name, c.alsoAbout].filter((x): x is string => !!x);
+      if (byType.has(c.type) || (c.opensStoryline && opening) || who.some((x) => taken.has(x))) continue;
       opening ||= c.opensStoryline;
+      for (const x of who) taken.add(x);
       byType.set(c.type, c.id);
     }
     const picks = [...byType.values()].slice(0, brief.pick);
@@ -324,16 +328,36 @@ describe("AI director", () => {
     expect(monday.directorPlan).toBeNull();
   });
 
-  it("rejects bad plans and falls back to the random draw", () => {
+  it("repairs flawed plans instead of throwing them away", () => {
     const s = friday();
     const brief = directorBrief(s)!;
     const ids = brief.candidates.map((c) => c.id);
-    const bad: DirectorPlan[] = [
-      { quarter: 1, week: 2, picks: ["made_up:0", ...ids.slice(1, brief.pick)], requiredId: null, rationale: {}, arcNote: "" },
-      { quarter: 1, week: 2, picks: ids.slice(0, brief.pick - 1), requiredId: null, rationale: {}, arcNote: "" },
-      { quarter: 1, week: 3, picks: ids.slice(0, brief.pick), requiredId: null, rationale: {}, arcNote: "" },
+    const flawed: DirectorPlan[] = [
+      { quarter: 1, week: 2, picks: ["made_up:0", ...ids.slice(1, brief.pick)], requiredId: "made_up:0", rationale: { "made_up:0": "x" }, arcNote: "" },
+      { quarter: 1, week: 2, picks: ids.slice(0, 1), requiredId: null, rationale: {}, arcNote: "" },
+      { quarter: 1, week: 2, picks: [ids[0], ids[0], ...ids], requiredId: null, rationale: {}, arcNote: "" },
     ];
-    for (const plan of bad) expect(applyDirectorPlan(s, plan).accepted).toBe(false);
+    for (const plan of flawed) {
+      const { state, accepted } = applyDirectorPlan(s, plan);
+      expect(accepted).toBe(true);
+      const fixed = state.directorPlan!;
+      expect(fixed.picks).not.toContain("made_up:0");
+      expect(new Set(fixed.picks).size).toBe(fixed.picks.length);
+      expect(fixed.picks.length).toBeLessThanOrEqual(brief.pick);
+      expect(fixed.picks.length).toBeGreaterThanOrEqual(Math.min(2, brief.pick));
+      if (fixed.requiredId) expect(fixed.picks).toContain(fixed.requiredId);
+      expect(Object.keys(fixed.rationale).every((id) => fixed.picks.includes(id))).toBe(true);
+      // Monday still gets one demand per person.
+      const people = toMonday(state).inbox.map((i) => i.subjectId).filter(Boolean);
+      expect(new Set(people).size).toBe(people.length);
+    }
+  });
+
+  it("rejects a plan for another week and falls back to the random draw", () => {
+    const s = friday();
+    const brief = directorBrief(s)!;
+    const ids = brief.candidates.map((c) => c.id);
+    expect(applyDirectorPlan(s, { quarter: 1, week: 3, picks: ids.slice(0, brief.pick), requiredId: null, rationale: {}, arcNote: "" }).accepted).toBe(false);
     const monday = toMonday(s);
     expect(monday.inboxSource.by).toBe("random");
     expect(monday.inbox.filter((i) => i.required).length).toBeLessThanOrEqual(1);

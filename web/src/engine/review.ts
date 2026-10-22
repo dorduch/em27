@@ -54,8 +54,11 @@ export function projectScore(p: Project, week: number): number {
   return Math.round(Math.min(100, (100 * p.progress) / expected));
 }
 
+/** The quarter's committed projects, plus stretch follow-ons only when counting them helps. */
 export function deliveryScore(s: GameState): number {
-  return Math.round(avg(s.projects.map((p) => projectScore(p, s.week))));
+  const core = s.projects.filter((p) => !p.stretch).map((p) => projectScore(p, s.week));
+  const all = s.projects.map((p) => projectScore(p, s.week));
+  return Math.round(Math.max(avg(core), avg(all)));
 }
 
 export function teamScore(s: GameState): number {
@@ -118,6 +121,9 @@ export function computeReview(s: GameState): ReviewResult {
   };
 }
 
+/** "A", "A and B", "A, B and C". */
+const listOf = (xs: string[]) => (xs.length <= 2 ? xs.join(" and ") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+
 function reviewLetter(
   s: GameState,
   r: { delivery: number; team: number; trust: number; grade: Grade; outcome: ReviewResult["outcome"] },
@@ -125,12 +131,16 @@ function reviewLetter(
   const shipped = s.projects.filter((p) => p.status === "shipped" || p.status === "late-shipped");
   const missed = s.projects.filter((p) => p.status === "missed");
   const broken = s.facts.filter((f) => f.quarter === s.quarter && f.status === "broken").length;
+  const left = s.departuresThisQuarter;
+  const flagship = s.projects.find((p) => p.flagship);
   const lines: string[] = [];
-  if (shipped.length) lines.push(`“You shipped ${shipped.map((p) => p.name).join(" and ")}. That matters.`);
+  if (shipped.length) lines.push(`“You shipped ${listOf(shipped.map((p) => p.name))}. That matters.`);
   else lines.push("“I was hoping to see something ship this quarter.");
-  if (missed.length) lines.push(`“${missed.map((p) => p.name).join(" and ")} missed ${missed.length > 1 ? "their dates" : "its date"}, and I heard about it before you told me.`);
+  if (s.company === "Vercel" && flagship?.status === "shipped") lines.push(`“${flagship.name} on stage at the keynote was the moment of the quarter.`);
+  if (missed.length) lines.push(`“${listOf(missed.map((p) => p.name))} missed ${missed.length > 1 ? "their dates" : "its date"}, and I heard about it before you told me.`);
+  if (left) lines.push(`“${left === 1 ? "Losing someone" : `Losing ${left} people`} in one quarter is something I noticed. So did your team.`);
   if (r.team < 55) lines.push("“Your team is tired. A team that needs a recovery quarter is not a plan.");
-  else if (r.team >= 75) lines.push("“Your team is still here, and still wants to be. Don’t underestimate that.");
+  else if (r.team >= 75 && !left) lines.push("“Your team is still here, and still wants to be. Don’t underestimate that.");
   if (broken) lines.push(`“${broken === 1 ? "A promise" : `${broken} promises`} didn’t make it. People remember those.`);
   if (r.trust < 50) lines.push("“Stakeholders are not convinced yet.");
   lines.push(
