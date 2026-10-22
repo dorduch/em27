@@ -51,6 +51,31 @@ export interface Engineer {
   projectId: string | null;
   awayFrom?: string; // the project they stepped off for a loan or a week off, so they can go back to it
   log: Cause[]; // most recent first, trimmed
+  /** Hidden ceiling for Coding, Debugging and Communication. Found through 1:1s. */
+  potential: number;
+  potentialKnown: boolean;
+  /** Development points toward the next +1 in each skill. Earned from the work you give them. */
+  growth: Record<SkillKey, number>;
+  /** Skills and level when this quarter started, for trend arrows and the squad report. */
+  qStart: Record<SkillKey, number> & { level: number };
+  /** Their story on your team: joined, shipped, promoted. Never trimmed. */
+  career: CareerEntry[];
+}
+
+export type SkillKey = "coding" | "debugging" | "communication";
+
+export interface CareerEntry {
+  quarter: number;
+  week: number;
+  text: string;
+  kind?: "join" | "ship" | "promo" | "grow" | "leave";
+}
+
+/** Someone who left, kept for the squad report and the recap. */
+export interface Alumnus {
+  name: string;
+  level: number;
+  career: CareerEntry[];
 }
 
 export interface Project {
@@ -230,6 +255,10 @@ export interface WeekResult {
   keynote?: "shipped" | "missed";
   /** This week's pager: who carried it when it fired, and whether it escalated to you. */
   incident?: { oncallId: string | null; escalated: boolean };
+  /** Engineers promoted this week: the back page celebrates them. */
+  promotions?: { id: string; name: string; from: number; to: number }[];
+  /** Skill growth this week ("Theo · Coding 12 → 13"). */
+  growth?: { id: string; name: string; skill: SkillKey; to: number; why: string }[];
   projects?: ProjectWeek[]; // absent in saves from before this field existed
 }
 
@@ -323,5 +352,6 @@ export interface GameState {
   pendingOffer: Offer | null;
   runEnd: "win" | "loss" | null;
   stats: RunStats;
+  alumni: Alumnus[];
   nextId: number;
 }

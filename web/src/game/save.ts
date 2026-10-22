@@ -1,3 +1,4 @@
+import { potentialFor, snapshot } from "@/engine/setup";
 import type { GameState } from "@/engine/types";
 
 export const SAVE_KEY = "em27.save.v1";
@@ -16,6 +17,15 @@ function upgrade(s: GameState): GameState {
     quarterEvents: s.quarterEvents ?? s.inbox.map((i) => i.type),
     arcs: s.arcs ?? [],
     arcHistory: s.arcHistory ?? [],
+    alumni: s.alumni ?? [],
+    engineers: s.engineers.map((e) => ({
+      ...e,
+      potential: e.potential ?? potentialFor(e),
+      potentialKnown: e.potentialKnown ?? false,
+      growth: e.growth ?? { coding: 0, debugging: 0, communication: 0 },
+      qStart: e.qStart ?? snapshot(e),
+      career: e.career ?? [{ quarter: s.quarter, week: 1, text: `On the team as L${e.level}.`, kind: "join" }],
+    })),
   };
 }
 

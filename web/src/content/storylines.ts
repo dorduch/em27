@@ -7,6 +7,7 @@
 // engine/hints.ts classifies, and the LLM may reword text but never effects.
 
 import type { ArcState, Category, Effect, Engineer, GameState, Project } from "@/engine/types";
+import { calibrationOdds, promoBar, promoReady } from "@/engine/growth";
 import type { Rng } from "@/engine/rng";
 import { E, active, by, first, levelTitle, loyaltyOdds, projectOf, type EventBody, type EventCtx } from "./events";
 
@@ -59,6 +60,9 @@ const show: Route = { show: true };
 const recently = (s: GameState, storyline: string, weeks: number) => s.arcHistory.some((h) => h.storyline === storyline && h.ended > s.quarter * 12 + s.week - weeks);
 const ended = (s: GameState, storyline: string, who: string, outcome?: string) =>
   s.arcHistory.some((h) => h.storyline === storyline && h.subjectId === who && (!outcome || h.outcome === outcome));
+/** Did this person's storyline end within the last `weeks` weeks? */
+const endedFor = (s: GameState, storyline: string, who: string, weeks: number) =>
+  s.arcHistory.some((h) => h.storyline === storyline && h.subjectId === who && h.ended > s.quarter * 12 + s.week - weeks);
 
 /* ------------------------------------------------------------------------------------ */
 /* The Promo: an ambitious engineer wants the next level. Commit, be honest, or dodge.  */
@@ -69,7 +73,14 @@ const promo: Storyline = {
   title: "The Promo",
   cat: "PEOPLE",
   canBeRequired: true,
-  weight: (s, e) => (e.tenure !== "new" && e.attrs.ambition >= 12 && e.level >= 3 && e.level < 7 && !ended(s, "promo", e.id) && !recently(s, "promo", 8) ? 3 : 0),
+  // Ambition makes them ask; skills that clear the bar make them ask sooner. A promo case can come back
+  // a quarter after the last one ended, so a career keeps climbing.
+  weight: (s, e) =>
+    e.tenure !== "new" && (e.attrs.ambition >= 12 || (promoReady(e) && e.attrs.ambition >= 8)) && e.level >= 3 && e.level < 7 && !endedFor(s, "promo", e.id, 12) && !recently(s, "promo", 8)
+      ? promoReady(e)
+        ? 6
+        : 3
+      : 0,
   cast: (s, free, rng) => {
     const pool = free.filter((e) => promo.weight(s, e) > 0);
     return pool.length ? { subject: rng.pick(by(pool, (e) => e.attrs.ambition).slice(0, 2)) } : null;
@@ -218,18 +229,21 @@ const promo: Storyline = {
       route: ({ s }) => (s.week >= 9 ? show : { wait: true }),
       build: ({ subject: e, flags, peer }) => {
         const strong = flags.includes("evidence");
-        const odds = strong ? 0.65 : 0.3;
+        const odds = calibrationOdds(e, strong);
+        const skills = promoReady(e)
+          ? `${first(e)}’s skills clear the L${e.level + 1} bar.`
+          : `${first(e)}’s skills are short of the L${e.level + 1} bar (${promoBar(e)}), and the committee can count.`;
         return {
           from: "Calibration",
           fromRole: "Room 4B, no laptops",
           title: `${first(e)}’s packet is on the screen`,
-          body: `${strong ? `The packet is solid: scope, impact, a design doc.` : `The packet is thin. Someone asks what “shipped stuff” means.`} ${peer.name.split(" ")[0]}’s report is up next and also “had a great half”.`,
+          body: `${strong ? `The packet is solid: scope, impact, a design doc.` : `The packet is thin. Someone asks what “shipped stuff” means.`} ${skills} ${peer.name.split(" ")[0]}’s report is up next and also “had a great half”.`,
           intents: [
             {
               id: "allin",
               label: `Go all-in for ${first(e)}`,
               cost: 2,
-              hints: `Political Capital ↓ · Peer Trust ↓ · ${strong ? "Depends on the packet" : "Coin flip"}`,
+              hints: `Political Capital ↓ · Peer Trust ↓ · ${odds >= 0.7 ? "Likely promoted" : odds >= 0.45 ? "Coin flip" : "Long shot"}`,
               effects: [
                 E.meter("capital", -8),
                 E.trust("peer", -3),

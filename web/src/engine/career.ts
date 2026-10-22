@@ -6,7 +6,8 @@ import { fillInbox } from "./inbox";
 import { capacityFor, produce } from "./plan";
 import { REVIEW_REPUTATION, isStrong } from "./review";
 import { makeRng } from "./rng";
-import { autoAssign, makeEngineer, makeProjects, makeSquad, TEAM_SIZE } from "./setup";
+import { SKILL_LABEL } from "./growth";
+import { autoAssign, joined, makeEngineer, makeProjects, makeSquad, SKILLS, snapshot, TEAM_SIZE } from "./setup";
 import type { CompanyId, GameState, Level, Offer, StakeholderRole } from "./types";
 
 export const FIRING_REPUTATION = -20;
@@ -21,6 +22,11 @@ function salaryFor(company: CompanyId, level: Level, rng: ReturnType<typeof make
 export function newQuarter(s: GameState): GameState {
   return produce(s, (d) => {
     const rng = makeRng(d.seed, d.quarter + 1, "new-quarter");
+    // Close the quarter in everyone's career record: what they grew this quarter.
+    for (const e of d.engineers) {
+      const grew = SKILLS.filter((k) => e.attrs[k] > e.qStart[k]).map((k) => `${SKILL_LABEL[k]} +${e.attrs[k] - e.qStart[k]}`);
+      if (grew.length) e.career.push({ quarter: d.quarter, week: 12, text: `Grew ${grew.join(", ")}.`, kind: "grow" });
+    }
     d.quarter += 1;
     d.week = 1;
     d.phase = "plan";
@@ -38,6 +44,7 @@ export function newQuarter(s: GameState): GameState {
       while (d.engineers.length < max) {
         const hire = makeEngineer(rng, `e${d.nextId++}`, used);
         hire.tenure = "new";
+        joined(hire, d.quarter, 1, `Joined as L${hire.level}, filling an open seat.`);
         d.engineers.push(hire);
       }
       // Each quarter asks a little more: the team got better, so the roadmap got bigger.
@@ -51,6 +58,7 @@ export function newQuarter(s: GameState): GameState {
       e.attrs.morale = Math.round(14 + (e.attrs.morale - 14) / 2);
       e.projectId = null;
       delete e.awayFrom;
+      e.qStart = snapshot(e);
     }
     autoAssign(d.engineers, d.projects);
     // Promises still open at quarter end (made too late to come due) carry over to week 2.
@@ -180,6 +188,8 @@ export function startNewJob(s: GameState): GameState {
     d.company = offer.company;
     d.level = level;
     d.engineers = makeSquad(rng, TEAM_SIZE[level], d.nextId);
+    for (const e of d.engineers) joined(e, d.quarter + 1, 1, `On the team when you arrived at ${offer.company}, as L${e.level}.`);
+    d.alumni = [];
     d.nextId += 20;
     const roles: StakeholderRole[] = ["skip", "pm", "peer"];
     d.stakeholders = roles.map((role) => {

@@ -5,6 +5,8 @@ import { COMPANIES, KEYNOTE_WEEK, PACKET_TARGET } from "@/content/companies";
 import { expectedProgress } from "@/content/events";
 import { TRAIT_LABEL } from "@/content/people";
 import { engineerOutput } from "@/engine/resolve";
+import { pointsToGrow, promoBar, promoCase, promoReady, SKILL_LABEL, skillAverage } from "@/engine/growth";
+import { SKILLS } from "@/engine/setup";
 import { forecastAll, forecastLabel, forecastMove, forecastTone, type Forecast } from "@/engine/forecast";
 import {
   assign,
@@ -414,11 +416,12 @@ export function SquadScreen({ s, go }: ScreenProps) {
               <small>
                 L{e.level} · {projectName(e.projectId)}
                 {s.plan.oncallId === e.id ? " · ON CALL" : ""}
+                {promoReady(e) ? " · PROMO READY" : ""}
                 {s.plan.oneOnOnes.includes(e.id) ? " · 1:1" : ""}
               </small>
             </span>
-            <Num v={e.attrs.coding} />
-            <Num v={e.attrs.debugging} />
+            <Num v={e.attrs.coding} up={e.attrs.coding - e.qStart.coding} />
+            <Num v={e.attrs.debugging} up={e.attrs.debugging - e.qStart.debugging} />
             <Num v={e.attrs.morale} />
             <span className="energy">
               {e.attrs.energy}
@@ -436,7 +439,9 @@ export function SquadScreen({ s, go }: ScreenProps) {
       <p className="helper">
         <span className="bad">1–7 low</span> · <span className="warn">8–13 capable</span> · <span className="good">14–20 strong</span>
         <br />
-        Tap an engineer for their full attributes and history.
+        ▲ grew this quarter. People grow from the work you give them: owning a project, the flagship, the pager, your 1:1s.
+        <br />
+        Tap an engineer for their full attributes, development and career.
       </p>
       {tired && tired.attrs.energy <= 8 && (
         <div className="notice">
@@ -491,7 +496,7 @@ export function PlayerScreen({ s, set, go, toast, id }: ScreenProps & { id: stri
             {a.group && <div className="attr-group">{a.group}</div>}
             <div className="attr">
               <span>{a.label}</span>
-              <Num v={e.attrs[a.key]} />
+              <Num v={e.attrs[a.key]} up={a.key in e.qStart ? e.attrs[a.key] - e.qStart[a.key as keyof typeof e.qStart] : 0} />
             </div>
           </div>
         ))}
@@ -500,8 +505,55 @@ export function PlayerScreen({ s, set, go, toast, id }: ScreenProps & { id: stri
           <span>Loyalty</span>
           <Num v={e.loyaltyKnown ? e.loyalty : "?"} />
         </div>
+        <div className="attr">
+          <span>Potential</span>
+          <Num v={e.potentialKnown ? e.potential : "?"} />
+        </div>
       </div>
-      <p className="helper">{e.loyaltyKnown ? "Loyalty discovered through 1:1s." : "Loyalty stays hidden until discovered through 1:1s."}</p>
+      <p className="helper">
+        {e.potentialKnown
+          ? `Potential is the ceiling for Coding, Debugging and Communication. ${first(e.name)} can grow to ${e.potential}.`
+          : "Loyalty and Potential stay hidden until discovered through 1:1s. Potential is how far their skills can grow."}
+      </p>
+      <div className="section-head">
+        <span>PROMO CASE</span>
+        <span>{e.level < 7 ? `L${e.level} → L${e.level + 1}` : "TOP OF THE LADDER"}</span>
+      </div>
+      {e.level < 7 && (
+        <div className="panel promo-case">
+          <Meter value={Math.round(promoCase(e) * 100)} label="Promo case" />
+          <p>
+            {promoReady(e) ? (
+              <b className="good">Ready. Skills clear the L{e.level + 1} bar.</b>
+            ) : (
+              <b>
+                Skill average {skillAverage(e).toFixed(1)} of {promoBar(e)} needed.
+              </b>
+            )}{" "}
+            Calibration weighs the packet and whether their skills clear the bar.
+          </p>
+        </div>
+      )}
+      <div className="section-head">
+        <span>DEVELOPMENT</span>
+        <span>NEXT +1</span>
+      </div>
+      <div className="panel">
+        {SKILLS.map((k) => {
+          const capped = e.attrs[k] >= e.potential;
+          return (
+            <div className="attr growth-row" key={k}>
+              <span>{SKILL_LABEL[k]}</span>
+              {capped && e.potentialKnown ? (
+                <small>At their ceiling</small>
+              ) : (
+                <Meter value={Math.round((e.growth[k] / pointsToGrow(e)) * 100)} label={`${SKILL_LABEL[k]} growth`} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="helper">Coding grows on projects (faster on the flagship, a stretch, or one they own alone). Debugging grows on the pager. Communication grows in your 1:1s. Nobody learns when Energy or Morale is low.</p>
       <div className="section-head">
         <span>DISCOVERED TRAITS</span>
         <span>{e.scout} 1:1s</span>
@@ -531,7 +583,21 @@ export function PlayerScreen({ s, set, go, toast, id }: ScreenProps & { id: stri
         </>
       )}
       <div className="section-head">
-        <span id="player-history">WHY THESE NUMBERS?</span>
+        <span id="player-history">CAREER</span>
+        <span>ON YOUR TEAM</span>
+      </div>
+      <div className="panel">
+        {[...e.career].reverse().map((c, i) => (
+          <div className="why" key={i}>
+            <b className={c.kind === "promo" || c.kind === "ship" || c.kind === "grow" ? "good" : undefined}>{c.text}</b>
+            <small>
+              Q{c.quarter} · week {c.week}
+            </small>
+          </div>
+        ))}
+      </div>
+      <div className="section-head">
+        <span>WHY THESE NUMBERS?</span>
       </div>
       <div className="panel">
         {e.log.length ? (
@@ -569,7 +635,7 @@ export function PlayerScreen({ s, set, go, toast, id }: ScreenProps & { id: stri
           <span>{booked ? "✓ 1:1 booked · tap to refund" : "Book a 1:1"}</span>
           <span className="cost">1 slot</span>
         </span>
-        <HintChips hints="Morale ↑ · Reveals a trait or Loyalty" />
+        <HintChips hints="Morale ↑ · Coaching: Communication ↑ · Reveals a trait, Loyalty or Potential" />
       </button>
       <button
         type="button"
@@ -583,10 +649,9 @@ export function PlayerScreen({ s, set, go, toast, id }: ScreenProps & { id: stri
       </button>
       <details>
         <summary style={{ minHeight: 44, padding: "12px 0", color: "var(--muted)", fontSize: 12, cursor: "pointer" }}>People operations</summary>
-        <p className="helper">Promotion, PIP, hiring and dismissal need budget, evidence and a deliberate review. They arrive in a later build.</p>
-        <button type="button" className="secondary" disabled>
-          Promote · review flow not built yet
-        </button>
+        <p className="helper">
+          Promotions go through calibration: when {first(e.name)} asks, the promo case above is what the committee weighs. PIP and dismissal need a deliberate review and arrive in a later build.
+        </p>
         <button type="button" className="secondary" disabled>
           PIP · review flow not built yet
         </button>

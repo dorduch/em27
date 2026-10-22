@@ -14,12 +14,13 @@ const GOOD_PHRASES = [
   "promise kept",
   "hiring chance",
   "chance they stay",
-  "reveals a trait or loyalty",
+  "reveals a trait",
+  "likely promoted",
   "trust back",
   "✓",
 ];
 const BAD_PHRASES = ["risk", "leaves", "promise broken"];
-const NEUTRAL_PHRASES = ["promise due", "depends on", "coin flip", "chance coding", "may fade away", "deadline +"];
+const NEUTRAL_PHRASES = ["promise due", "depends on", "coin flip", "long shot", "chance coding", "may fade away", "deadline +"];
 
 export function classifyHint(segment: string): Valence | "unknown" {
   const s = segment.trim().toLowerCase();

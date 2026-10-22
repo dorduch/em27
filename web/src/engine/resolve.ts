@@ -14,7 +14,8 @@ import {
 } from "./plan";
 import { forecast } from "./forecast";
 import { makeRng, type Rng } from "./rng";
-import { makeEngineer, makeFollowOn, TEAM_SIZE } from "./setup";
+import { GROW, pointsToGrow, SKILL_LABEL, stalled } from "./growth";
+import { joined, makeEngineer, makeFollowOn, TEAM_SIZE } from "./setup";
 import type {
   ArcState,
   AttrKey,
@@ -23,6 +24,7 @@ import type {
   Engineer,
   FridayLine,
   GameState,
+  SkillKey,
   StakeholderRole,
   WeekResult,
 } from "./types";
@@ -62,6 +64,8 @@ export function engineerOutput(e: Engineer, techDebt: number): number {
 class Resolver {
   causes: Cause[] = [];
   departures: { name: string; how: "quit" | "cut" | "transfer" }[] = [];
+  promotions: NonNullable<WeekResult["promotions"]> = [];
+  growth: NonNullable<WeekResult["growth"]> = [];
   lines: FridayLine[] = [];
   hires = 0;
   minute = 9 * 60 + 5;
@@ -132,11 +136,29 @@ class Resolver {
       e.loyaltyKnown = true;
       return `Loyalty is ${e.loyalty}`;
     }
+    if (!e.potentialKnown) {
+      e.potentialKnown = true;
+      return `Potential ${e.potential}: ${e.potential >= 18 ? "a rare ceiling" : e.potential >= 15 ? "room to grow" : "close to their best already"}`;
+    }
     return null;
+  }
+
+  /** Bank growth points; enough of them is +1 in that skill, never past their ceiling. */
+  grow(e: Engineer, skill: SkillKey, points: number, why: string) {
+    if (stalled(e) || e.attrs[skill] >= e.potential) return;
+    e.growth[skill] += points;
+    const need = pointsToGrow(e);
+    if (e.growth[skill] < need) return;
+    e.growth[skill] -= need;
+    this.attr(e, skill, 1, why);
+    this.growth.push({ id: e.id, name: e.name, skill, to: e.attrs[skill], why });
   }
 
   leave(e: Engineer, why: string, how: "quit" | "cut" | "transfer" = "quit") {
     this.d.engineers = this.d.engineers.filter((x) => x.id !== e.id);
+    const left = how === "cut" ? "Role cut in a reorg." : how === "transfer" ? "Transferred to another team." : "Resigned.";
+    e.career.push({ quarter: this.d.quarter, week: this.d.week, text: `${left} Left as L${e.level}.`, kind: "leave" });
+    this.d.alumni.push({ name: e.name, level: e.level, career: e.career });
     this.d.departuresThisQuarter += 1;
     this.d.stats.departed.push(e.name);
     this.departures.push({ name: e.name, how });
@@ -286,6 +308,8 @@ class Resolver {
             e.level += 1;
             this.cause(`${first(e)}’s level`, 1, why, e);
             this.line(`${e.name} is promoted to L${e.level}.`, why, "good");
+            this.promotions.push({ id: e.id, name: e.name, from: e.level - 1, to: e.level });
+            e.career.push({ quarter: this.d.quarter, week: this.d.week, text: `Promoted to L${e.level}.`, kind: "promo" });
           }
           break;
         }
@@ -412,6 +436,7 @@ export function resolveWeek(s: GameState): GameState {
       const e = r.eng(id);
       if (!e) continue;
       r.attr(e, "morale", 1, "1:1 with you");
+      r.grow(e, "communication", GROW.oneOnOne, "Coaching in your 1:1s");
       const found = r.reveal(e, "1:1");
       r.line(`1:1 with ${first(e)}.${found ? ` You learn something: <b>${found}</b>.` : " Good conversation, nothing new."}`, "1:1 → scouting", found ? "good" : undefined);
     }
@@ -461,6 +486,14 @@ export function resolveWeek(s: GameState): GameState {
     for (const e of d.engineers) {
       if (!e.projectId) r.attr(e, "energy", 2, "A week off the critical path");
     }
+    // The work grows people: more when it's the flagship, a stretch, or theirs alone.
+    for (const e of d.engineers) {
+      const p = d.projects.find((x) => x.id === e.projectId && x.status === "active");
+      if (!p) continue;
+      const alone = d.engineers.filter((x) => x.projectId === p.id).length === 1;
+      const hard = p.flagship || p.stretch || alone;
+      r.grow(e, "coding", GROW.work + (hard ? GROW.stretch : 0), hard ? `Weeks ${alone ? "owning" : "on"} ${p.name}` : `Weeks on ${p.name}`);
+    }
 
     // 4. Ships and deadlines.
     const shippedNames: string[] = [];
@@ -478,6 +511,8 @@ export function resolveWeek(s: GameState): GameState {
         for (const e of team) {
           e.projectId = null;
           r.attr(e, "morale", 2, `${p.name} shipped`);
+          r.grow(e, "coding", GROW.ship, `Shipped ${p.name}`);
+          e.career.push({ quarter: d.quarter, week: d.week, text: `Shipped ${p.name}${late ? ", late" : ""}.`, kind: "ship" });
         }
         shippedNames.push(p.name);
         r.line(`${p.name} ships${late ? ", late" : ""}. <b class="good">Released.</b>`, "Delivery → Trust and Reputation", "good");
@@ -522,6 +557,7 @@ export function resolveWeek(s: GameState): GameState {
     let incident: WeekResult["incident"];
     const oncall = d.plan.oncallId ? r.eng(d.plan.oncallId) : undefined;
     if (oncall) r.attr(oncall, "energy", -1, "On call this week");
+    if (oncall) r.grow(oncall, "debugging", GROW.oncall, "Weeks carrying the pager");
     const pIncident = COMPANIES[d.company].incidentBase + d.techDebt / 250 + d.oncallLoad / 400;
     if (rng.chance(pIncident)) {
       d.stats.incidents++;
@@ -532,6 +568,7 @@ export function resolveWeek(s: GameState): GameState {
       if (oncall && rng.chance(pFix)) {
         r.meter("oncallLoad", 2, "Incident contained quickly");
         r.attr(oncall, "energy", -1, "Incident response");
+        r.grow(oncall, "debugging", GROW.incident, "Contained an incident");
         r.line("The runbook works. Back to green in 18 minutes.", "Debugging + Energy → quick recovery", "good");
       } else {
         const stripe = d.company === "Stripe";
@@ -565,8 +602,14 @@ export function resolveWeek(s: GameState): GameState {
       const hire = makeEngineer(rng, `e${d.nextId++}`, used2);
       hire.tenure = "new";
       hire.level = Math.min(hire.level, 5);
+      joined(hire, d.quarter, d.week + 1, `Hired as L${hire.level}.`);
       d.engineers.push(hire);
       r.line(`${hire.name} accepts the offer. Starts Monday, unassigned.`, "Hiring → headcount", "good");
+    }
+
+    // 7b. Growth: name who got better and why, so the work you gave them reads as investment.
+    for (const g of r.growth) {
+      r.line(`${g.name.split(" ")[0]}’s ${SKILL_LABEL[g.skill]} grows to ${g.to}.`, `${g.why} → growth`, "good", 5);
     }
 
     // 8. You.
@@ -582,20 +625,23 @@ export function resolveWeek(s: GameState): GameState {
     const badN = r.lines.filter((l) => l.tone === "bad").length;
     const good = goodN >= badN;
     // The headline reports what actually happened, most newsworthy first.
+    const promo = r.promotions[0];
     const headline =
-      keynote === "shipped"
-        ? `On stage, on time.<br>${flagship!.name} is live.`
-        : keynote === "missed"
-          ? "An empty stage.<br>A very full Slack."
-          : r.departures.length
-            ? departureHeadline(r.departures[0])
-            : shippedNames.length
-              ? `${shippedNames[0]} ships.<br>${escalated ? "The pager had notes." : "Nobody cried. Mostly."}`
-              : missedNames.length
-                ? `${missedNames[0]} misses its date.<br>The retro is already booked.`
-                : escalated
-                  ? "The pager won this week.<br>Rollback by teatime."
-                  : rng.pick(good ? GOOD_HEADLINES : BAD_HEADLINES);
+      promo && !keynote
+        ? `${promo.name} makes L${promo.to}.<br>The calendar invite says “Congrats!!”.`
+        : keynote === "shipped"
+          ? `On stage, on time.<br>${flagship!.name} is live.`
+          : keynote === "missed"
+            ? "An empty stage.<br>A very full Slack."
+            : r.departures.length
+              ? departureHeadline(r.departures[0])
+              : shippedNames.length
+                ? `${shippedNames[0]} ships.<br>${escalated ? "The pager had notes." : "Nobody cried. Mostly."}`
+                : missedNames.length
+                  ? `${missedNames[0]} misses its date.<br>The retro is already booked.`
+                  : escalated
+                    ? "The pager won this week.<br>Rollback by teatime."
+                    : rng.pick(good ? GOOD_HEADLINES : BAD_HEADLINES);
     const projects = d.projects
       .filter((p) => startActive.includes(p.id))
       .map((p) => ({
@@ -624,6 +670,8 @@ export function resolveWeek(s: GameState): GameState {
       keynote,
       incident,
       projects,
+      promotions: r.promotions.length ? r.promotions : undefined,
+      growth: r.growth.length ? r.growth : undefined,
     };
     d.phase = "friday";
   });

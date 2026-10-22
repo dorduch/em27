@@ -5,6 +5,8 @@ import { COMPANIES, COMPANY_IDS, KEYNOTE_WEEK, PACKET_TARGET } from "@/content/c
 import { FAREWELLS } from "@/content/people";
 import { buildRecap, type Recap } from "@/engine/career";
 import { forecast } from "@/engine/forecast";
+import { SKILL_LABEL } from "@/engine/growth";
+import { SKILLS } from "@/engine/setup";
 import { deliveryScore, GRADES, teamScore, trustScore } from "@/engine/review";
 import type { CompanyId, GameState, Offer } from "@/engine/types";
 import { Badge, Btn, first, money, Rich } from "./ui";
@@ -85,7 +87,10 @@ export function BackPageScreen({ s, onNext }: { s: GameState; onNext: () => void
   // Group identical causes across engineers ("Team Morale +1 (3 engineers) · Public kudos").
   const rows: { subject: string; delta: number; why: string }[] = [];
   const grouped = new Map<string, { attr: string; delta: number; why: string; n: number }>();
+  const growth = w.growth ?? [];
   for (const c of w.causes) {
+    // Skill growth has its own section.
+    if (growth.some((g) => c.why === g.why && c.subject === `${first(g.name)}’s ${SKILL_LABEL[g.skill]}`)) continue;
     // The project rows show the team's weekly output; progress your decisions added or cost stays in the list.
     if (projects.length && c.subject.endsWith(" progress") && c.why.endsWith(" on the work")) continue;
     const m = c.subject.match(/^(.+)’s (Morale|Energy|Loyalty|Coding|Debugging|Communication|Ambition)$/);
@@ -116,6 +121,42 @@ export function BackPageScreen({ s, onNext }: { s: GameState; onNext: () => void
         <Rich text={w.headline} />
       </h1>
       <p className="recap">{w.recap}</p>
+      {(w.promotions ?? []).map((p) => {
+        const e = s.engineers.find((x) => x.id === p.id);
+        const shipped = e?.career.filter((c) => c.kind === "ship").map((c) => c.text.replace(/^Shipped /, "").replace(/\.$/, "")) ?? [];
+        return (
+          <section className="promotion-card" key={p.id}>
+            <span className="eyebrow">PROMOTION · L{p.from} → L{p.to}</span>
+            <h2>{p.name}</h2>
+            <p>
+              {e && e.career[0] ? `${e.career[0].text.replace(/\.$/, "")}. ` : ""}
+              {shipped.length ? `Shipped ${shipped.slice(-3).join(", ")}. ` : ""}
+              The committee said yes.
+            </p>
+          </section>
+        );
+      })}
+      {growth.length > 0 && (
+        <>
+          <div className="section-head">
+            <span>THE SQUAD / WHO GREW</span>
+            <span>{growth.length}</span>
+          </div>
+          <div className="cause-list">
+            {growth.map((g, i) => (
+              <div className="delta" key={i}>
+                <b className="good">▲ {g.to}</b>
+                <div>
+                  <strong>
+                    {first(g.name)}’s {SKILL_LABEL[g.skill]}
+                  </strong>
+                  <small>{g.why}</small>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
       {projects.length > 0 && (
         <>
           <div className="section-head">
@@ -301,6 +342,7 @@ export function ReviewScreen({ s, onContinue }: { s: GameState; onContinue: () =
           </p>
         ))}
       </div>
+      <SquadReport s={s} />
       {!open ? (
         <>
           <div className="rating">
@@ -357,6 +399,50 @@ export function ReviewScreen({ s, onContinue }: { s: GameState; onContinue: () =
           <p className="helper">Grade scale: {GRADES.join(" · ")}.</p>
         </>
       )}
+    </>
+  );
+}
+
+/** Who grew this quarter, who got promoted, who left: the squad's season in one table. */
+function SquadReport({ s }: { s: GameState }) {
+  const rows = s.engineers.map((e) => {
+    const deltas = SKILLS.map((k) => ({ k, d: e.attrs[k] - e.qStart[k] })).filter((x) => x.d !== 0);
+    return { e, deltas, total: deltas.reduce((n, x) => n + x.d, 0), promoted: e.level > e.qStart.level };
+  });
+  const best = Math.max(0, ...rows.map((r) => r.total));
+  const left = s.alumni.filter((a) => a.career.some((c) => c.kind === "leave" && c.quarter === s.quarter));
+  return (
+    <>
+      <div className="section-head">
+        <span>SQUAD REPORT</span>
+        <span>Q{s.quarter}</span>
+      </div>
+      <div className="cause-list squad-report">
+        {rows.map(({ e, deltas, total, promoted }) => (
+          <div className="delta" key={e.id}>
+            <b className={total > 0 || promoted ? "good" : undefined}>{promoted ? `L${e.level}` : total > 0 ? `▲ ${total}` : "–"}</b>
+            <div>
+              <strong>
+                {e.name}
+                {best > 0 && total === best ? " · most improved" : ""}
+              </strong>
+              <small>
+                {promoted ? `Promoted L${e.qStart.level} → L${e.level}. ` : ""}
+                {deltas.length ? deltas.map((x) => `${SKILL_LABEL[x.k]} ${x.d > 0 ? "+" : "−"}${Math.abs(x.d)}`).join(" · ") : "No growth this quarter."}
+              </small>
+            </div>
+          </div>
+        ))}
+        {left.map((a) => (
+          <div className="delta" key={a.name}>
+            <b className="bad">Left</b>
+            <div>
+              <strong>{a.name}</strong>
+              <small>{a.career[a.career.length - 1].text}</small>
+            </div>
+          </div>
+        ))}
+      </div>
     </>
   );
 }

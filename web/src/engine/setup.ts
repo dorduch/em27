@@ -7,6 +7,7 @@ import type {
   GameState,
   Level,
   Project,
+  SkillKey,
   StakeholderRole,
   Stakeholder,
   Trait,
@@ -20,6 +21,24 @@ const PROJECTS: Record<Exclude<Level, "Director">, number> = { EM: 3, "Senior EM
 const TRAITS: Trait[] = ["flight-risk", "hero-coder", "quiet-genius", "drama-magnet", "wants-to-lead", "steady"];
 
 const clamp = (v: number, lo = 1, hi = 20) => Math.max(lo, Math.min(hi, v));
+
+export const SKILLS: SkillKey[] = ["coding", "debugging", "communication"];
+
+/**
+ * Hidden ceiling for the three skills. Juniors have more headroom. Drawn from its own stream, keyed by
+ * the engineer, so adding it doesn't shift any other random draw (and old saves can be backfilled).
+ */
+export function potentialFor(e: Pick<Engineer, "id" | "name" | "level" | "attrs">): number {
+  const r = makeRng("potential", e.name, e.id);
+  const best = Math.max(...SKILLS.map((k) => e.attrs[k]));
+  const headroom = e.level <= 3 ? r.int(3, 8) : e.level === 4 ? r.int(2, 7) : e.level === 5 ? r.int(1, 5) : r.int(0, 3);
+  return clamp(best + headroom);
+}
+
+/** Snapshot skills and level, for trend arrows and the squad report. */
+export function snapshot(e: Engineer): Engineer["qStart"] {
+  return { coding: e.attrs.coding, debugging: e.attrs.debugging, communication: e.attrs.communication, level: e.level };
+}
 
 export function makeEngineer(rng: Rng, id: string, usedNames: Set<string>): Engineer {
   // First names stay unique within a squad so commentary like "Theo and Jonah" is unambiguous.
@@ -35,7 +54,7 @@ export function makeEngineer(rng: Rng, id: string, usedNames: Set<string>): Engi
   const skill = (lo: number, hi: number) => clamp(rng.int(lo, hi) + (level - 4));
   const traits = rng.shuffle(TRAITS).slice(0, rng.int(1, 2));
   const tenureMonths = rng.int(2, 60);
-  return {
+  const e: Engineer = {
     id,
     name,
     level,
@@ -56,7 +75,22 @@ export function makeEngineer(rng: Rng, id: string, usedNames: Set<string>): Engi
     scout: 0,
     projectId: null,
     log: [],
+    potential: 0,
+    potentialKnown: false,
+    growth: { coding: 0, debugging: 0, communication: 0 },
+    qStart: { coding: 0, debugging: 0, communication: 0, level },
+    career: [],
   };
+  e.potential = potentialFor(e);
+  e.qStart = snapshot(e);
+  return e;
+}
+
+/** Start someone's career record on your team. */
+export function joined(e: Engineer, quarter: number, week: number, text: string): void {
+  e.qStart = snapshot(e);
+  e.potential = Math.max(e.potential, potentialFor(e));
+  e.career.push({ quarter, week, text, kind: "join" });
 }
 
 function makeStakeholders(rng: Rng): Stakeholder[] {
@@ -140,6 +174,7 @@ export function makeSquad(rng: Rng, size: number, idBase: number): Engineer[] {
 export function newGame(company: CompanyId, seed: number): GameState {
   const rng = makeRng(seed, "new-game");
   const engineers = makeSquad(rng, TEAM_SIZE.EM, 1);
+  for (const e of engineers) joined(e, 1, 1, `On the team when you arrived, as L${e.level}.`);
   const projects = makeProjects(rng, company, "EM", 1);
   autoAssign(engineers, projects);
   const oncall = [...engineers].sort((a, b) => b.attrs.debugging - a.attrs.debugging)[0];
@@ -184,6 +219,7 @@ export function newGame(company: CompanyId, seed: number): GameState {
     pendingOffer: null,
     runEnd: null,
     stats: { projectsShipped: 0, incidents: 0, promisesKept: 0, promisesBroken: 0, departed: [] },
+    alumni: [],
     nextId: 100,
   };
   fillInbox(s);
