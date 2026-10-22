@@ -27,7 +27,7 @@ Aim for a quarter that feels like a story:
 Ground every pick in the brief:
 - Who carries the pager is onCall (and team[].onCall). Only someone on call can be haunted by the pager.
 - Who works on a project is projects[].staff. Never place a person on a project they are not staffed on.
-- A project is behind only when forecastFinishWeek is later than dueWeek, or percent is below expectedPercent. Don't describe an on-track project as slipping or blown.
+- A project is behind only when forecastFinishWeek is null or later than dueWeek; that is what the player sees. Don't describe an on-track project as slipping or blown.
 
 Write each reason as one short sentence (under 16 words) for a game designer reading a debug view. A reason may only cite facts that appear in the brief, and only about that candidate's own person, sender or project; never attribute a number to someone else. Refer to people by name or as "they"; never guess anyone's gender or use he/she/him/her. Write arcNote as one sentence on where the quarter is heading.`;
 

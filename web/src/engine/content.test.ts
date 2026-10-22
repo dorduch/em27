@@ -43,8 +43,8 @@ const ctxFor = (s: GameState): EventCtx => ({
 describe("event content", () => {
   const all = states();
 
-  it("has 16 one-off event types and storylines with unique ids that the director route accepts", () => {
-    expect(EVENT_TYPES.length).toBe(16);
+  it("has 24 one-off event types and storylines with unique ids that the director route accepts", () => {
+    expect(EVENT_TYPES.length).toBe(24);
     const ids = [...EVENT_TYPES.map((t) => t.id), ...STORYLINES.map((x) => x.id)];
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) expect(`${id}:0`).toMatch(/^[a-z0-9_]+:\d$/);
@@ -273,5 +273,50 @@ describe("event premises", () => {
       expect(p.staff.length).toBeGreaterThan(0);
       expect(p.forecastFinishWeek).not.toBeUndefined();
     }
+  });
+});
+
+describe("pacing", () => {
+  /** A sensible player: answers the must-respond cheaply, then picks a middling option for the rest. */
+  const sensible = (s: GameState): GameState => {
+    const req = blockingItem(s);
+    if (req) s = choose(s, req.id, [...req.intents].sort((a, b) => a.cost - b.cost)[0].id);
+    for (const item of s.inbox) {
+      if (s.plan.choices[item.id]) continue;
+      const opts = [...item.intents].sort((a, b) => b.cost - a.cost);
+      s = choose(s, item.id, opts[Math.floor(opts.length / 2)].id);
+    }
+    return s;
+  };
+
+  it("keeps every week busy: more demands than time, and the backlog refills after a ship", () => {
+    const sizes: number[][] = Array.from({ length: 13 }, () => []);
+    let followOns = 0;
+    for (const c of COMPANIES) {
+      for (let seed = 1; seed <= 12; seed++) {
+        let s = newGame(c, seed);
+        while (s.phase !== "review") {
+          sizes[s.week].push(s.inbox.length);
+          s = advanceFromBackPage(finishFriday(resolveWeek(sensible(s))));
+          if (s.phase === "checkin") s = finishCheckin(s, 0);
+        }
+        followOns += s.projects.filter((p) => p.stretch).length;
+      }
+    }
+    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    for (let w = 1; w <= 11; w++) {
+      expect(mean(sizes[w]), `week ${w} average`).toBeGreaterThanOrEqual(3.5);
+      expect(sizes[w].filter((n) => n <= 1).length, `week ${w} near-empty`).toBeLessThanOrEqual(sizes[w].length * 0.05);
+    }
+    expect(mean(sizes[12])).toBeGreaterThanOrEqual(2.5);
+    expect(followOns).toBeGreaterThan(0);
+  });
+
+  it("scores stretch follow-ons only when they help", async () => {
+    const { deliveryScore } = await import("./review");
+    const s = newGame("Stripe", 3);
+    const core = s.projects.map((p) => ({ ...p, status: "shipped" as const, progress: p.scope }));
+    const stretch = { ...core[0], id: "px", name: "Stretch", status: "active" as const, progress: 0, startWeek: 9, dueWeek: 12, stretch: true };
+    expect(deliveryScore({ ...s, week: 12, projects: [...core, stretch] })).toBe(100);
   });
 });

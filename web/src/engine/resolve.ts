@@ -13,7 +13,7 @@ import {
   WEEKLY_STRESS_DECAY,
 } from "./plan";
 import { makeRng, type Rng } from "./rng";
-import { makeEngineer, TEAM_SIZE } from "./setup";
+import { makeEngineer, makeFollowOn, TEAM_SIZE } from "./setup";
 import type {
   ArcState,
   AttrKey,
@@ -133,14 +133,25 @@ class Resolver {
     return null;
   }
 
-  leave(e: Engineer, why: string) {
+  leave(e: Engineer, why: string, how: "quit" | "cut" | "transfer" = "quit") {
     this.d.engineers = this.d.engineers.filter((x) => x.id !== e.id);
     this.d.departuresThisQuarter += 1;
     this.d.stats.departed.push(e.name);
-    if (this.d.plan.oncallId === e.id) this.d.plan.oncallId = null;
     this.cause(`${first(e)} left the team`, -1, why);
-    this.line(`${e.name} hands in their notice. <b class="bad">Headcount −1.</b>`, why, "bad");
+    const said = how === "cut" ? "is cut in the reorg" : how === "transfer" ? "transfers to another team" : "hands in their notice";
+    this.line(`${e.name} ${said}. <b class="bad">Headcount −1.</b>`, why, "bad");
+    this.handOffPager(e);
     for (const o of this.d.engineers) this.attr(o, "morale", -1, `${first(e)} left`);
+  }
+
+  /** Whoever carried the pager is gone or away: the best-rested strong debugger picks it up, so it is never silently empty. */
+  handOffPager(from: Engineer) {
+    if (this.d.plan.oncallId !== from.id) return;
+    const next = this.d.engineers
+      .filter((x) => x.id !== from.id)
+      .sort((a, b) => b.attrs.debugging + b.attrs.energy - (a.attrs.debugging + a.attrs.energy))[0];
+    this.d.plan.oncallId = next?.id ?? null;
+    if (next) this.line(`${first(next)} picks up the pager from ${first(from)}.`, "On-call hand-off", undefined);
   }
 
   endArc(arc: ArcState, outcome: string) {
@@ -238,7 +249,20 @@ class Resolver {
         }
         case "leave": {
           const e = this.eng(ef.who);
-          if (e) this.leave(e, why);
+          if (e) this.leave(e, why, ef.how);
+          break;
+        }
+        case "assign": {
+          const e = this.eng(ef.who);
+          if (e && this.d.projects.some((p) => p.id === ef.project && p.status === "active")) e.projectId = ef.project;
+          break;
+        }
+        case "away": {
+          const e = this.eng(ef.who);
+          if (e) {
+            e.projectId = null;
+            this.handOffPager(e);
+          }
           break;
         }
         case "hire":
@@ -277,6 +301,7 @@ class Resolver {
         case "chance": {
           const hit = this.rng.chance(ef.p);
           if (hit) notes.push(ef.note.toLowerCase());
+          else if (ef.miss) notes.push(ef.miss.toLowerCase());
           notes.push(...this.apply(hit ? ef.then : (ef.else ?? []), why));
           break;
         }
@@ -355,8 +380,11 @@ export function resolveWeek(s: GameState): GameState {
       if (r.arc && !r.arcMoved && d.arcs.includes(r.arc)) r.endArc(r.arc, "faded");
       r.arc = undefined;
     }
-    // 1b. Storylines still open wear on people while they wait.
+    if (calls.length) r.line(`Your calls: ${calls.join("; ")}.`, "Your decisions → applied");
+    // 1b. Storylines still open wear on people while they wait. One you just answered doesn't.
+    const answered = new Set(s.inbox.map((i) => i.arc?.id).filter(Boolean));
     for (const arc of [...d.arcs]) {
+      if (answered.has(arc.id)) continue;
       const sl = storylineById(arc.storyline);
       const ctx = sl?.simmer && beatCtx(baseCtx(d), arc);
       const cost = ctx && sl.simmer!(ctx, arc.beat);
@@ -364,7 +392,6 @@ export function resolveWeek(s: GameState): GameState {
       r.apply(cost.effects, cost.why);
       r.line(`${cost.why}.`, `${sl.title} → still unresolved`, "bad");
     }
-    if (calls.length) r.line(`Your calls: ${calls.join("; ")}.`, "Your decisions → applied");
     if (slid.length) r.line(`Let slide: ${slid.join("; ")}.`, "Ignored, no immediate cost");
 
     // 2. 1:1s: morale and scouting.
@@ -433,13 +460,25 @@ export function resolveWeek(s: GameState): GameState {
         r.meter("reputation", 2, `${p.name} shipped`);
         r.meter("capital", 4, `${p.name} shipped`);
         r.meter("packet", 3, `${p.name} launch evidence`);
-        for (const e of d.engineers.filter((x) => x.projectId === p.id)) {
+        const team = d.engineers.filter((x) => x.projectId === p.id);
+        for (const e of team) {
           e.projectId = null;
           r.attr(e, "morale", 2, `${p.name} shipped`);
         }
         shippedNames.push(p.name);
         r.line(`${p.name} ships${late ? ", late" : ""}. <b class="good">Released.</b>`, "Delivery → Trust and Reputation", "good");
-      } else if (d.week >= p.dueWeek) {
+        // The backlog refills: the same team rolls onto the next thing, as a stretch goal.
+        const next = makeFollowOn(rng, d.company, p, d.week, d.projects.map((x) => x.name), `p${d.nextId++}`);
+        if (next) {
+          d.projects.push(next);
+          for (const e of team) e.projectId = next.id;
+          const owner = d.stakeholders.find((x) => x.role === next.owner)!;
+          r.line(
+            `Next up from ${owner.name.split(" ")[0]}: ${next.name}. ${team.length ? `${team.map(first).join(" and ")} roll onto it. ` : ""}A stretch goal, due week ${next.dueWeek}.`,
+            "Shipped → the backlog refills",
+          );
+        }
+      } else if (d.week >= p.dueWeek && !p.stretch) {
         p.status = "missed";
         r.trust(p.owner, -8, `${p.name} missed its date`);
         r.meter("reputation", -3, `${p.name} missed its date`);

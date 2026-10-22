@@ -233,7 +233,7 @@ const promo: Storyline = {
               effects: [
                 E.meter("capital", -8),
                 E.trust("peer", -3),
-                E.chance(odds, "Promoted", [{ k: "levelUp", who: e.id }, E.attr(e.id, "morale", 4), E.loyalty(e.id, 3), end("promoted")], [E.attr(e.id, "morale", -2), next("fallout", 1)]),
+                E.chance(odds, "Promoted", [{ k: "levelUp", who: e.id }, E.attr(e.id, "morale", 4), E.loyalty(e.id, 3), end("promoted")], [E.attr(e.id, "morale", -2), next("fallout", 1)], "Not this cycle"),
               ],
               cause: `Fought for ${first(e)} in calibration`,
             },
@@ -344,7 +344,7 @@ const promo: Storyline = {
           },
         ],
         ignoreHint: "Loyalty ↓ · Leave risk",
-        ignoreEffects: [E.loyalty(e.id, -3), E.chance(0.6, "They took the offer", [E.leave(e.id), end("left")], [E.attr(e.id, "morale", -2), end("stayed")])],
+        ignoreEffects: [E.loyalty(e.id, -3), E.chance(0.6, "They took the offer", [E.leave(e.id), end("left")], [E.attr(e.id, "morale", -2), end("stayed")], "They stayed, unhappy")],
         ignoreCause: "Recruiter conversation ignored",
       }),
     },
@@ -440,7 +440,7 @@ const burnout: Storyline = {
               label: "Insist on a real week off",
               cost: 1,
               hints: "Energy ↑↑ · Progress ↓ · PM Trust ↓",
-              effects: [E.attr(e.id, "energy", 6), ...(p ? [E.progress(p.id, -6)] : []), E.trust("pm", -2), next("back", 1)],
+              effects: [E.attr(e.id, "energy", 6), E.away(e.id), E.trust("pm", -2), next("back", 1)],
               cause: "A real week off",
             },
             {
@@ -561,14 +561,27 @@ const burnout: Storyline = {
               effects: [E.meter("oncallLoad", -6), E.attr(e.id, "debugging", 1), E.loyalty(e.id, 1), end("recovered")],
               cause: "Runbook rewrite after recovery",
             },
-            {
-              id: "ship",
-              label: "Point them straight at the deadline",
-              cost: 0,
-              hints: "Progress ↑ · Energy ↓",
-              effects: [...(p ? [E.progress(p.id, 5)] : []), E.attr(e.id, "energy", -2), end("recovered")],
-              cause: "Back on the critical path",
-            },
+            ...(p
+              ? [
+                  {
+                    id: "ship",
+                    label: `Put them straight back on ${p.name}`,
+                    cost: 0,
+                    hints: "Progress ↑ · Energy ↓",
+                    effects: [E.assign(e.id, p.id), E.progress(p.id, 5), E.attr(e.id, "energy", -2), end("recovered")],
+                    cause: "Back on the critical path",
+                  },
+                ]
+              : [
+                  {
+                    id: "ease",
+                    label: "Let them ease back in",
+                    cost: 0,
+                    hints: "Energy ↑ · Political Capital ↓",
+                    effects: [E.attr(e.id, "energy", 2), E.meter("capital", -1), end("recovered")],
+                    cause: "A gentle return",
+                  },
+                ]),
           ],
           ignoreHint: "Morale ↓",
           ignoreEffects: [E.attr(e.id, "morale", -1), end("recovered")],
@@ -618,7 +631,7 @@ const reorg: Storyline = {
             label: "Tell the team at standup there’s nothing to it",
             cost: 1,
             hints: "Team Morale ↑ · Reputation risk",
-            effects: [E.chance(0.4, "It sounded true", [E.team("morale", 1)], [E.team("morale", -1), E.meter("reputation", -1)]), flag("reassured"), next("list", 1, 2)],
+            effects: [E.chance(0.4, "It sounded true", [E.team("morale", 1)], [E.team("morale", -1), E.meter("reputation", -1)], "Nobody believed it"), flag("reassured"), next("list", 1, 2)],
             cause: "Reorg rumor addressed at standup",
           },
           {
@@ -659,7 +672,7 @@ const reorg: Storyline = {
               label: "Rank honestly and draw the line",
               cost: 2,
               hints: `Skip Trust ↑ · ${low ? first(low) : "Someone"} leaves · Team Morale ↓`,
-              effects: [...(low ? [E.leave(low.id)] : []), E.trust("skip", 4), E.team("morale", -1), next("aftermath", 1, 1)],
+              effects: [...(low ? [E.leave(low.id, "cut")] : []), E.trust("skip", 4), E.team("morale", -1), next("aftermath", 1, 1)],
               cause: "Drew the line on the spreadsheet",
             },
             {
@@ -669,7 +682,7 @@ const reorg: Storyline = {
               hints: `Political Capital ↓↓ · ${flags.includes("prepared") ? "Depends on the impact doc" : "Coin flip"}`,
               effects: [
                 E.meter("capital", -10),
-                E.chance(odds, "Zero cuts held", [E.team("morale", 1), flag("held"), next("aftermath", 1, 1)], [...(low ? [E.leave(low.id)] : []), E.trust("skip", -4), next("aftermath", 1, 1)]),
+                E.chance(odds, "Zero cuts held", [E.team("morale", 1), flag("held"), next("aftermath", 1, 1)], [...(low ? [E.leave(low.id, "cut")] : []), E.trust("skip", -4), next("aftermath", 1, 1)], "The cut went ahead"),
               ],
               cause: "Fought for zero cuts",
             },
@@ -678,12 +691,12 @@ const reorg: Storyline = {
               label: "Warn the team first",
               cost: 1,
               hints: `Team Morale ↑ · Skip Trust ↓↓ · ${low ? first(low) : "Someone"} leaves`,
-              effects: [...(low ? [E.leave(low.id)] : []), E.team("morale", 1), E.trust("skip", -8), next("aftermath", 1, 1)],
+              effects: [...(low ? [E.leave(low.id, "cut")] : []), E.team("morale", 1), E.trust("skip", -8), next("aftermath", 1, 1)],
               cause: "Warned the team before the list",
             },
           ],
           ignoreHint: `Skip Trust ↓ · ${first(senior)} leaves`,
-          ignoreEffects: [E.leave(senior.id), E.trust("skip", -6), E.team("morale", -1), end("cut")],
+          ignoreEffects: [E.leave(senior.id, "cut"), E.trust("skip", -6), E.team("morale", -1), end("cut")],
           ignoreCause: "Finance drew the line for you",
         };
       },
@@ -806,7 +819,7 @@ const rewrite: Storyline = {
               cost: 1,
               hints: "Depends on Coding and Debugging · On-call Load risk",
               effects: [
-                E.chance(odds, "Clean cutover", [E.meter("techDebt", -10), E.attr(e.id, "morale", 3), end("shipped")], [E.meter("oncallLoad", 10), E.trust("pm", -3), next("incident", 1)]),
+                E.chance(odds, "Clean cutover", [E.meter("techDebt", -10), E.attr(e.id, "morale", 3), end("shipped")], [E.meter("oncallLoad", 10), E.trust("pm", -3), next("incident", 1)], "The cutover broke something"),
               ],
               cause: "Cut over to v2",
             },
@@ -856,7 +869,7 @@ const rewrite: Storyline = {
             hints: "Energy ↓ · Depends on Debugging",
             effects: [
               E.attr(e.id, "energy", -3),
-              E.chance(e.attrs.debugging / 20, "Fixed forward", [E.meter("techDebt", -6), E.meter("oncallLoad", -4), end("shipped")], [E.trust("skip", -3), E.meter("oncallLoad", 2), end("limping")]),
+              E.chance(e.attrs.debugging / 20, "Fixed forward", [E.meter("techDebt", -6), E.meter("oncallLoad", -4), end("shipped")], [E.trust("skip", -3), E.meter("oncallLoad", 2), end("limping")], "Still limping"),
             ],
             cause: "Fixed forward",
           },
@@ -1029,7 +1042,7 @@ const feud: Storyline = {
               hints: "Coin flip · Debugging ↑",
               effects: [
                 E.attr(a.id, "debugging", 1),
-                E.chance(0.5, "They respect each other now", [E.attr(a.id, "morale", 3), E.attr(b!.id, "morale", 3), end("friends")], [E.attr(a.id, "morale", -2), E.attr(b!.id, "morale", -2), next("sides", 1, 1)]),
+                E.chance(0.5, "They respect each other now", [E.attr(a.id, "morale", 3), E.attr(b!.id, "morale", 3), end("friends")], [E.attr(a.id, "morale", -2), E.attr(b!.id, "morale", -2), next("sides", 1, 1)], "It got worse"),
               ],
               cause: "Paired the rivals",
             },
@@ -1055,7 +1068,7 @@ const feud: Storyline = {
             label: "Support the transfer",
             cost: 1,
             hints: `${first(b!)} leaves · Reputation ↑`,
-            effects: [E.meter("reputation", 2), E.leave(b!.id), end("transferred")],
+            effects: [E.meter("reputation", 2), E.leave(b!.id, "transfer"), end("transferred")],
             cause: "Supported an internal transfer",
           },
           {
@@ -1063,7 +1076,7 @@ const feud: Storyline = {
             label: "Ask them to give it one quarter",
             cost: 1,
             hints: "Morale ↑ · Chance they stay",
-            effects: [E.attr(b!.id, "morale", 2), E.chance(loyaltyOdds(b!, 0.35), "They’ll give it a quarter", [E.loyalty(b!.id, 2), end("stayed")], [E.leave(b!.id), end("transferred")])],
+            effects: [E.attr(b!.id, "morale", 2), E.chance(loyaltyOdds(b!, 0.35), "They’ll give it a quarter", [E.loyalty(b!.id, 2), end("stayed")], [E.leave(b!.id, "transfer"), end("transferred")])],
             cause: "Asked them to stay a quarter",
           },
           {
@@ -1076,7 +1089,7 @@ const feud: Storyline = {
           },
         ],
         ignoreHint: "Morale ↓ · Loyalty ↓ · Leave risk",
-        ignoreEffects: [E.attr(b!.id, "morale", -2), E.loyalty(b!.id, -3), E.chance(0.4, "The transfer went through", [E.leave(b!.id)]), end("drifted")],
+        ignoreEffects: [E.attr(b!.id, "morale", -2), E.loyalty(b!.id, -3), E.chance(0.4, "The transfer went through", [E.leave(b!.id, "transfer")]), end("drifted")],
         ignoreCause: "Transfer request left unanswered",
       }),
     },
@@ -1216,7 +1229,7 @@ const launch: Storyline = {
               hints: `Team Energy ↓ · ${safe ? "Depends on Tech Debt" : "Coin flip"}`,
               effects: [
                 E.team("energy", -1),
-                E.chance(odds, "Stable by noon", [E.progress(p!.id, 6), E.meter("reputation", 1), end("launched")], [E.meter("oncallLoad", 6), E.trust("pm", -3), next("retro", 1)]),
+                E.chance(odds, "Stable by noon", [E.progress(p!.id, 6), E.meter("reputation", 1), end("launched")], [E.meter("oncallLoad", 6), E.trust("pm", -3), next("retro", 1)], "Launch day wobbled"),
               ],
               cause: "Ran the launch war room",
             },
@@ -1227,7 +1240,7 @@ const launch: Storyline = {
               hints: "Energy ↓ · Depends on Debugging",
               effects: [
                 E.attr(e.id, "energy", -3),
-                E.chance(Math.min(0.85, e.attrs.debugging / 20), `${first(e)} handled it`, [E.progress(p!.id, 4), E.attr(e.id, "morale", 2), end("launched")], [E.meter("oncallLoad", 6), next("retro", 1)]),
+                E.chance(Math.min(0.85, e.attrs.debugging / 20), `${first(e)} handled it`, [E.progress(p!.id, 4), E.attr(e.id, "morale", 2), end("launched")], [E.meter("oncallLoad", 6), next("retro", 1)], "It got away from them"),
               ],
               cause: "Launch lead ran the incident",
             },
@@ -1343,14 +1356,14 @@ const planning: Storyline = {
           from: peer.name,
           fromRole: "Peer EM",
           title: `“Can we borrow ${first(e)} for three weeks?”`,
-          body: `${peerFirst}’s team has a launch in trouble and next quarter’s planning starts Monday. ${peerFirst} needs someone who knows the payments path, and everyone knows who that is.`,
+          body: `${peerFirst}’s team has a launch in trouble and next quarter’s planning starts Monday. ${peerFirst} needs someone who knows ${p ? p.name : "your stack"} inside out, and everyone knows who that is.`,
           intents: [
             {
               id: "lend",
               label: `Lend ${first(e)}`,
               cost: 0,
               hints: p ? "Peer Trust ↑↑ · Progress ↓" : "Peer Trust ↑↑ · Energy ↓",
-              effects: [E.trust("peer", 6), ...(p ? [E.progress(p.id, -6)] : [E.attr(e.id, "energy", -1)]), flag("lent"), next("away", 2, 3)],
+              effects: [E.trust("peer", 6), ...(p ? [] : [E.attr(e.id, "energy", -1)]), E.away(e.id), flag("lent"), next("away", 2, 3)],
               cause: `Lent ${first(e)} to ${peerFirst}`,
             },
             {
@@ -1358,7 +1371,7 @@ const planning: Storyline = {
               label: "Lend them, for a headcount slot next quarter",
               cost: 1,
               hints: p ? "Political Capital ↑ · Peer Trust ↑ · Progress ↓" : "Political Capital ↑ · Peer Trust ↑",
-              effects: [E.meter("capital", 5), E.trust("peer", 2), ...(p ? [E.progress(p.id, -6)] : []), flag("lent"), next("away", 2, 3)],
+              effects: [E.meter("capital", 5), E.trust("peer", 2), E.away(e.id), flag("lent"), next("away", 2, 3)],
               cause: "Traded an engineer loan for headcount",
             },
             {
@@ -1407,12 +1420,12 @@ const planning: Storyline = {
             label: "“You’re back on Monday.”",
             cost: 0,
             hints: "Morale ↓ · Loyalty ↓ · Leave risk",
-            effects: [E.attr(e.id, "morale", -3), E.loyalty(e.id, -2), E.chance(0.25, "They took the transfer anyway", [E.leave(e.id), end("transferred")], [next("roadmap", 1)])],
+            effects: [E.attr(e.id, "morale", -3), E.loyalty(e.id, -2), E.chance(0.25, "They took the transfer anyway", [E.leave(e.id, "transfer"), end("transferred")], [next("roadmap", 1)])],
             cause: "Ordered them back",
           },
         ],
         ignoreHint: "Morale ↓ · Leave risk",
-        ignoreEffects: [E.attr(e.id, "morale", -2), E.chance(0.5, "They stayed over there", [E.leave(e.id), end("transferred")], [next("roadmap", 1)])],
+        ignoreEffects: [E.attr(e.id, "morale", -2), E.chance(0.5, "They stayed over there", [E.leave(e.id, "transfer"), end("transferred")], [next("roadmap", 1)])],
         ignoreCause: "Nobody asked them back",
       }),
     },
@@ -1438,7 +1451,7 @@ const planning: Storyline = {
             label: "Use the slot to fight for headcount",
             cost: 1,
             hints: `Political Capital ↓ · ${flags.includes("lent") ? "Hiring chance" : "Coin flip"}`,
-            effects: [E.meter("capital", -6), E.chance(flags.includes("lent") ? 0.7 : 0.35, "Headcount approved", [{ k: "hire" }, end("headcount")], [E.trust("skip", -2), end("denied")])],
+            effects: [E.meter("capital", -6), E.chance(flags.includes("lent") ? 0.7 : 0.35, "Headcount approved", [{ k: "hire" }, end("headcount")], [E.trust("skip", -2), end("denied")], "Headcount denied")],
             cause: "Fought for headcount at planning",
           },
           {

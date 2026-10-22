@@ -93,7 +93,9 @@ export function WeekScreen({ s, set, go, toast, directorStatus }: ScreenProps & 
         <small>MONDAY</small>
       </div>
       <p className="subtitle">
-        {s.inbox.length} demands. {s.capacity} slots. Something has to give.
+        {s.inbox.length === 0
+          ? `No demands. ${s.capacity} slots. Enjoy it while it lasts.`
+          : `${s.inbox.length} ${s.inbox.length === 1 ? "demand" : "demands"}. ${s.capacity} slots. Something has to give.`}
       </p>
       <SinceFriday s={s} />
       {unstaffed.length > 0 && (

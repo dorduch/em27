@@ -70,8 +70,12 @@ export function makeProjects(
   company: CompanyId,
   level: Exclude<Level, "Director">,
   idBase: number,
+  exclude: string[] = [],
 ): Project[] {
-  const names = rng.shuffle(COMPANIES[company].projectNames);
+  // Fresh names each quarter: last quarter's projects shipped (or died), they don't come back.
+  const pool = COMPANIES[company].projectNames;
+  const unused = pool.filter((n) => !exclude.includes(n));
+  const names = rng.shuffle(unused.length >= PROJECTS[level] ? unused : pool);
   const owners: StakeholderRole[] = ["pm", "skip", "peer", "skip"];
   // Staggered deadlines so the quarter has rhythm. Vercel's flagship is pinned to the keynote.
   const dues = level === "EM" ? [6, 9, 12] : [5, 8, 10, 12];
@@ -88,6 +92,30 @@ export function makeProjects(
   }));
   if (company === "Vercel") projects[0].dueWeek = KEYNOTE_WEEK;
   return projects;
+}
+
+/** No follow-on after this week: there would be too little quarter left to do it. */
+export const FOLLOW_ON_LAST_WEEK = 9;
+
+/**
+ * The next thing on the backlog, arriving the Monday after `shipped` ships. A stretch goal: sized to the
+ * weeks left, due at quarter end, and it only counts toward Delivery if shipping it helps.
+ */
+export function makeFollowOn(rng: Rng, company: CompanyId, shipped: Project, week: number, taken: string[], id: string): Project | null {
+  const names = COMPANIES[company].projectNames.filter((n) => !taken.includes(n));
+  if (!names.length || week > FOLLOW_ON_LAST_WEEK) return null;
+  return {
+    id,
+    name: rng.pick(names),
+    owner: shipped.owner,
+    scope: Math.min(80, 20 * (12 - week)),
+    progress: 0,
+    startWeek: week + 1,
+    dueWeek: 12,
+    flagship: false,
+    status: "active",
+    stretch: true,
+  };
 }
 
 /** Spread engineers across projects, strongest coders first. */

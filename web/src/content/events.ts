@@ -15,6 +15,7 @@ import type {
   Project,
   Stakeholder,
 } from "@/engine/types";
+import { forecast } from "@/engine/forecast";
 import type { Rng } from "@/engine/rng";
 
 export interface EventCtx {
@@ -68,10 +69,12 @@ export const projectOf = (s: GameState, e: Engineer) => s.projects.find((p) => p
 /** The best communicator staffed on a project: who you'd send to negotiate or demo it. */
 const voiceOf = (s: GameState, p: Project) => by(s.engineers.filter((e) => e.projectId === p.id), (e) => e.attrs.communication)[0];
 const shipped = (p: Project) => p.status === "shipped" || p.status === "late-shipped";
-/** Behind its straight-line schedule: the only state in which "the estimate was a belief" is true. */
-const behind = (p: Project, week: number) => p.progress < expectedProgress(p, week);
+/** Behind as the Projects screen shows it: at current staffing it won’t ship by its due week. */
+const behind = (s: GameState, p: Project) => ["behind", "stalled"].includes(forecast(p, s.engineers, s.techDebt, s.week).kind);
 /** The player dealt with the situation, so the event stays away for the rest of the quarter. */
 const settle = (type: string): Effect => ({ k: "settle", type });
+/** Not yet used this quarter for this person or project (see EventType.oncePer), so setup never picks a spent target. */
+const fresh = (s: GameState, type: string, id: string) => !(s.quarterEvents ?? []).includes(`${type}@${id}`);
 
 export const E = {
   attr: (who: string, attr: "coding" | "debugging" | "communication" | "ambition" | "morale" | "energy", d: number): Effect => ({ k: "attr", who, attr, d }),
@@ -81,8 +84,10 @@ export const E = {
   progress: (project: string, d: number): Effect => ({ k: "progress", project, d }),
   scope: (project: string, d: number): Effect => ({ k: "scope", project, d }),
   team: (attr: "morale" | "energy", d: number): Effect => ({ k: "teamAttr", attr, d }),
-  leave: (who: string): Effect => ({ k: "leave", who }),
-  chance: (p: number, note: string, then: Effect[], els: Effect[] = []): Effect => ({ k: "chance", p, note, then, else: els }),
+  leave: (who: string, how?: "quit" | "cut" | "transfer"): Effect => ({ k: "leave", who, ...(how ? { how } : {}) }),
+  away: (who: string): Effect => ({ k: "away", who }),
+  assign: (who: string, project: string): Effect => ({ k: "assign", who, project }),
+  chance: (p: number, note: string, then: Effect[], els: Effect[] = [], miss?: string): Effect => ({ k: "chance", p, note, then, else: els, ...(miss ? { miss } : {}) }),
 };
 
 export const EVENT_TYPES: EventType[] = [
@@ -118,10 +123,10 @@ export const EVENT_TYPES: EventType[] = [
           id: "growth",
           label: "Talk about growth, not money",
           cost: 1,
-          hints: "Chance they stay · Reveals a trait or Loyalty",
+          hints: "Chance they stay · Morale risk · Reveals a trait or Loyalty",
           effects: [
             { k: "scout", who: e!.id, d: 1 },
-            E.chance(loyaltyOdds(e!, 0.2), "The growth plan landed", [E.loyalty(e!.id, 2), E.attr(e!.id, "morale", 1)], [E.attr(e!.id, "morale", -2)]),
+            E.chance(loyaltyOdds(e!, 0.2), "The growth plan landed", [E.loyalty(e!.id, 2), E.attr(e!.id, "morale", 1)], [E.attr(e!.id, "morale", -2)], "Growth talk didn’t land"),
           ],
           cause: "A growth conversation",
         },
@@ -200,7 +205,7 @@ export const EVENT_TYPES: EventType[] = [
     // Rolling tickets need tickets: only someone staffed on an active project.
     weight: (s) => (s.engineers.some((e) => e.attrs.coding <= 11 && projectOf(s, e)) ? 2 : 0),
     setup: (ctx) => {
-      const e = by(ctx.s.engineers.filter((x) => projectOf(ctx.s, x)), (x) => -x.attrs.coding)[0];
+      const e = by(ctx.s.engineers.filter((x) => projectOf(ctx.s, x) && fresh(ctx.s, "underperformer", x.id)), (x) => -x.attrs.coding)[0];
       return e && e.attrs.coding <= 11 ? { ...ctx, subject: e } : null;
     },
     build: ({ subject: e, s }) => ({
@@ -304,7 +309,7 @@ export const EVENT_TYPES: EventType[] = [
     oncePer: "project", // the same "live dashboard for the demo" only lands once on a project
     weight: (s) => (active(s).length ? 3 : 0),
     setup: (ctx, rng) => {
-      const ps = active(ctx.s);
+      const ps = active(ctx.s).filter((p) => fresh(ctx.s, "scope_creep", p.id));
       if (!ps.length) return null;
       const p = rng.pick(ps);
       return { ...ctx, project: p, subject: voiceOf(ctx.s, p) };
@@ -340,7 +345,7 @@ export const EVENT_TYPES: EventType[] = [
                 hints: `Depends on Communication · ${first(h)} Energy ↓`,
                 effects: [
                   E.attr(h.id, "energy", -2),
-                  E.chance(Math.min(0.9, h.attrs.communication / 20), "Negotiation landed", [E.trust("pm", 2)], [E.scope(p!.id, 10)]),
+                  E.chance(Math.min(0.9, h.attrs.communication / 20), "Negotiation landed", [E.trust("pm", 2)], [E.scope(p!.id, 10)], "Product won that one"),
                 ],
                 cause: `${first(h)} negotiated with product`,
               },
@@ -410,9 +415,9 @@ export const EVENT_TYPES: EventType[] = [
     canBeRequired: true,
     oncePer: "project",
     // Only a project that is actually behind its schedule; one that is ahead gets no crisis.
-    weight: (s) => (s.week >= 3 && active(s).some((p) => behind(p, s.week)) ? 4 : 0),
+    weight: (s) => (s.week >= 3 && active(s).some((p) => behind(s, p)) ? 4 : 0),
     setup: (ctx) => {
-      const ps = active(ctx.s).filter((p) => behind(p, ctx.s.week));
+      const ps = active(ctx.s).filter((p) => behind(ctx.s, p) && fresh(ctx.s, "estimate_blown", p.id));
       if (!ps.length) return null;
       const p = by(ps, (x) => expectedProgress(x, ctx.s.week) - x.progress)[0];
       return { ...ctx, project: p };
@@ -423,7 +428,7 @@ export const EVENT_TYPES: EventType[] = [
         from: "Sprint review",
         fromRole: `${p!.name} · due week ${p!.dueWeek}`,
         title: "The estimate was a belief",
-        body: `${p!.name} is at ${Math.round((p!.progress / p!.scope) * 100)}% with ${Math.max(0, p!.dueWeek - s.week)} weeks left. Someone says “we just need to push a bit.”`,
+        body: `${p!.name} is at ${Math.round((p!.progress / p!.scope) * 100)}% with ${Math.max(1, p!.dueWeek - s.week + 1)} week${p!.dueWeek - s.week + 1 === 1 ? "" : "s"} left. Someone says “we just need to push a bit.”`,
         intents: [
           {
             id: "cut",
@@ -476,7 +481,7 @@ export const EVENT_TYPES: EventType[] = [
     oncePer: "project", // one late endpoint per project; a workaround is not built twice
     weight: (s) => (active(s).length ? 2 : 0),
     setup: (ctx, rng) => {
-      const ps = active(ctx.s);
+      const ps = active(ctx.s).filter((p) => fresh(ctx.s, "dependency_late", p.id));
       return ps.length ? { ...ctx, project: rng.pick(ps) } : null;
     },
     build: ({ project: p, peer }) => ({
@@ -490,7 +495,7 @@ export const EVENT_TYPES: EventType[] = [
           label: "Escalate to both skip-levels",
           cost: 1,
           hints: "Peer Trust ↓ · Delivery risk",
-          effects: [E.trust("peer", -5), E.chance(0.6, "They delivered", [], [E.progress(p!.id, -4)])],
+          effects: [E.trust("peer", -5), E.chance(0.6, "They delivered", [], [E.progress(p!.id, -4)], "Still late")],
           cause: "Dependency escalated",
         },
         {
@@ -703,7 +708,7 @@ export const EVENT_TYPES: EventType[] = [
           label: "Send the existing weekly update",
           cost: 0,
           hints: "Time saved · Stress ↓ · Trust risk",
-          effects: [E.meter("stress", -1), E.chance(0.5, "Good enough", [], [E.trust("skip", -4)])],
+          effects: [E.meter("stress", -1), E.chance(0.5, "Good enough", [], [E.trust("skip", -4)], "They wanted the deck")],
           cause: "Weekly update sent instead",
         },
         {
@@ -759,7 +764,7 @@ export const EVENT_TYPES: EventType[] = [
         },
       ],
       ignoreHint: "Political Capital ↓ · May fade away · Trust risk",
-      ignoreEffects: [E.meter("capital", -2), E.chance(0.7, "Quietly forgotten", [], [E.trust("skip", -4)])],
+      ignoreEffects: [E.meter("capital", -2), E.chance(0.7, "Quietly forgotten", [], [E.trust("skip", -4)], "The CEO asked again")],
       ignoreCause: "CEO ask left unanswered",
     }),
   },
@@ -771,7 +776,7 @@ export const EVENT_TYPES: EventType[] = [
     oncePer: "project",
     weight: (s) => (s.projects.some(shipped) ? 2 * (s.company === "Google" ? 1.4 : 1) : 0),
     setup: (ctx) => {
-      const p = ctx.s.projects.find((x) => shipped(x) && !ctx.s.quarterEvents.includes(`peer_credit@${x.id}`));
+      const p = ctx.s.projects.find((x) => shipped(x) && fresh(ctx.s, "peer_credit", x.id));
       return p ? { ...ctx, project: p } : null;
     },
     build: ({ peer, project: p }) => ({
@@ -890,13 +895,376 @@ export const EVENT_TYPES: EventType[] = [
           label: "Bring the skip to your team meeting",
           cost: 1,
           hints: "Political Capital ↓ · Coin flip",
-          effects: [E.meter("capital", -2), E.chance(0.6, "It went well", [E.trust("skip", 3), E.team("morale", 1)], [E.trust("skip", -2)])],
+          effects: [E.meter("capital", -2), E.chance(0.6, "It went well", [E.trust("skip", 3), E.team("morale", 1)], [E.trust("skip", -2)], "It went sideways")],
           cause: "Brought the skip-level to team meeting",
         },
       ],
       ignoreHint: "Skip Trust ↓ · Stress ↑",
       ignoreEffects: [E.trust("skip", -4), E.meter("stress", 2)],
       ignoreCause: "The feedback stayed in the air",
+    }),
+  },
+
+  /* ------------------------- THE BACK HALF OF A QUARTER ------------------------- */
+  // Planning, perf season and the end-of-quarter rituals: they arrive from week 6 on, when the
+  // once-a-quarter politics are spent, so the second half is as busy as the first.
+  {
+    id: "headcount_plan",
+    cat: "POLITICS",
+    canBeRequired: true,
+    oncePer: "quarter",
+    weight: (s) => (s.week >= 7 && s.week <= 11 ? 3 : 0),
+    setup: (ctx) => ctx,
+    build: ({ skip }) => ({
+      from: skip.name,
+      fromRole: "Skip-level · planning",
+      title: "Next quarter’s headcount sheet",
+      body: `${skip.name.split(" ")[0]}’s sheet has one row per team and a column called “Justification (one line)”. Planning locks on Friday.`,
+      intents: [
+        {
+          id: "case",
+          label: "Write a real case, with delivery data",
+          cost: 2,
+          hints: "Political Capital ↑ · Skip Trust ↑ · Stress ↑",
+          effects: [E.meter("capital", 6), E.trust("skip", 3), E.meter("stress", 3)],
+          cause: "Made a data-backed headcount case",
+        },
+        {
+          id: "trade",
+          label: "Offer to drop a project for a hire",
+          cost: 1,
+          hints: "Political Capital ↑ · PM Trust ↓",
+          effects: [E.meter("capital", 4), E.trust("pm", -4)],
+          cause: "Traded roadmap for headcount",
+        },
+        {
+          id: "flat",
+          label: "Ask for flat headcount",
+          cost: 0,
+          hints: "Time saved · Political Capital ↓",
+          effects: [E.meter("capital", -2)],
+          cause: "Asked for flat headcount",
+        },
+      ],
+      ignoreHint: "Skip Trust ↓ · Political Capital ↓",
+      ignoreEffects: [E.trust("skip", -3), E.meter("capital", -3)],
+      ignoreCause: "Headcount row left blank",
+    }),
+  },
+  {
+    id: "holiday_oncall",
+    cat: "PEOPLE",
+    canBeRequired: false,
+    oncePer: "quarter",
+    weight: (s) => (s.week >= 6 && s.plan.oncallId && s.engineers.length >= 3 ? 2 + s.oncallLoad / 40 : 0),
+    setup: (ctx) => {
+      const e = ctx.s.engineers.find((x) => x.id === ctx.s.plan.oncallId);
+      return e ? { ...ctx, subject: e } : null;
+    },
+    build: ({ subject: e }) => ({
+      from: e!.name,
+      fromRole: `${levelTitle(e!)} · on call`,
+      title: "Nobody wants the holiday rotation",
+      body: `The long weekend falls on ${first(e!)}’s week. ${first(e!)} has written “family plans”, in quotes, in the rotation doc.`,
+      intents: [
+        {
+          id: "cover",
+          label: "Take the pager yourself",
+          cost: 1,
+          hints: "Team Morale ↑ · Stress ↑",
+          effects: [E.team("morale", 1), E.attr(e!.id, "energy", 1), E.meter("stress", 4)],
+          cause: "Covered the holiday pager yourself",
+        },
+        {
+          id: "comp",
+          label: "Give comp days for it",
+          cost: 0,
+          hints: `${first(e!)} Energy ↑ · Political Capital ↓`,
+          effects: [E.attr(e!.id, "energy", 2), E.attr(e!.id, "morale", 1), E.meter("capital", -4)],
+          cause: "Comp days for the holiday shift",
+        },
+        {
+          id: "rota",
+          label: "Hold the rotation as written",
+          cost: 0,
+          hints: `${first(e!)} Morale ↓ · On-call Load ↓`,
+          effects: [E.attr(e!.id, "morale", -2), E.meter("oncallLoad", -2)],
+          cause: "The rotation held",
+        },
+      ],
+      ignoreHint: "Morale ↓ · Loyalty ↓",
+      ignoreEffects: [E.attr(e!.id, "morale", -1), E.loyalty(e!.id, -1)],
+      ignoreCause: "The rotation fight was left to the team",
+    }),
+  },
+  {
+    id: "offsite",
+    cat: "PEOPLE",
+    canBeRequired: false,
+    oncePer: "quarter",
+    weight: (s) => (s.week >= 6 && s.week <= 11 ? 2 : 0),
+    setup: (ctx) => ({ ...ctx, project: active(ctx.s)[0] }),
+    build: ({ project: p }) => ({
+      from: "People Ops",
+      fromRole: "Offsite planning",
+      title: "The offsite has a trust fall",
+      body: "Two days, one venue with a ropes course, and an agenda slot called “Teams: present your learnings”. Attendance is “strongly encouraged”.",
+      intents: [
+        {
+          id: "run",
+          label: "Go, and run a real retro there",
+          cost: 2,
+          hints: "Team Morale ↑ · Team Energy ↑ · Stress ↑",
+          effects: [E.team("morale", 2), E.team("energy", 1), E.meter("stress", 3)],
+          cause: "A real retro at the offsite",
+        },
+        {
+          id: "send",
+          label: "Send the team, skip it yourself",
+          cost: 0,
+          hints: "Team Morale ↑ · Skip Trust ↓",
+          effects: [E.team("morale", 1), E.trust("skip", -3)],
+          cause: "The team went without you",
+        },
+        {
+          id: "decline",
+          label: "Decline for everyone: there’s a deadline",
+          cost: 1,
+          hints: `${p ? "Progress ↑ · " : ""}Team Morale ↓ · Skip Trust ↓`,
+          effects: [...(p ? [E.progress(p.id, 4)] : []), E.team("morale", -1), E.trust("skip", -2)],
+          cause: "Skipped the offsite for the roadmap",
+        },
+      ],
+      ignoreHint: "Skip Trust ↓",
+      ignoreEffects: [E.trust("skip", -4)],
+      ignoreCause: "Nobody RSVP’d",
+    }),
+  },
+  {
+    id: "peer_feedback",
+    cat: "PEOPLE",
+    canBeRequired: true,
+    oncePer: "quarter",
+    weight: (s) => (s.week >= 8 && s.week <= 11 ? 3 : 0),
+    setup: (ctx) => ctx,
+    build: ({ s }) => ({
+      from: "People Ops",
+      fromRole: "Performance cycle",
+      title: "Peer feedback is due Friday",
+      body: `${s.engineers.length} engineers, three questions each, and a form that times out after twenty minutes.`,
+      intents: [
+        {
+          id: "write",
+          label: "Write every one properly",
+          cost: 2,
+          hints: "Team Morale ↑ · Loyalty ↑ · Stress ↑",
+          effects: [E.team("morale", 1), ...s.engineers.map((e) => E.loyalty(e.id, 1)), E.meter("stress", 4)],
+          cause: "Wrote real feedback for everyone",
+        },
+        {
+          id: "self",
+          label: "Ask for self-reviews first",
+          cost: 1,
+          hints: "Time saved · Team Energy ↓",
+          effects: [E.team("energy", -1)],
+          cause: "Self-reviews first",
+        },
+        {
+          id: "template",
+          label: "Reuse last cycle’s phrasing",
+          cost: 0,
+          hints: "Stress ↓ · Morale risk",
+          effects: [E.meter("stress", -2), E.chance(0.5, "Nobody noticed", [], [E.team("morale", -1)], "Someone noticed")],
+          cause: "Recycled feedback",
+        },
+      ],
+      ignoreHint: "Morale ↓ · Skip Trust ↓",
+      ignoreEffects: [E.team("morale", -1), E.trust("skip", -3)],
+      ignoreCause: "Feedback went in late",
+    }),
+  },
+  {
+    id: "game_day",
+    cat: "DELIVERY",
+    canBeRequired: false,
+    oncePer: "quarter",
+    weight: (s) => (s.week >= 4 && s.oncallLoad >= 35 ? 2 : 0),
+    setup: (ctx) => {
+      const e = by(ctx.s.engineers, (x) => x.attrs.debugging)[0];
+      return e ? { ...ctx, subject: e, project: active(ctx.s)[0] } : null;
+    },
+    build: ({ subject: e, project: p }) => ({
+      from: "Reliability desk",
+      fromRole: "Game day",
+      title: "A game day, this Thursday",
+      body: `The SRE team wants to unplug things on purpose and see who notices. ${first(e!)} has volunteered the team, enthusiastically.`,
+      intents: [
+        {
+          id: "run",
+          label: "Run it properly",
+          cost: 2,
+          hints: `On-call Load ↓↓ · Debugging ↑${p ? " · Progress ↓" : ""}`,
+          effects: [E.meter("oncallLoad", -10), E.attr(e!.id, "debugging", 1), ...(p ? [E.progress(p.id, -4)] : [])],
+          cause: "Ran a proper game day",
+        },
+        {
+          id: "lead",
+          label: `Let ${first(e!)} run it`,
+          cost: 0,
+          hints: `On-call Load ↓ · ${first(e!)} Energy ↓`,
+          effects: [E.meter("oncallLoad", -5), E.attr(e!.id, "energy", -3)],
+          cause: `${first(e!)} ran the game day`,
+        },
+        {
+          id: "postpone",
+          label: "Postpone it to next quarter",
+          cost: 0,
+          hints: "Time saved · Incident risk",
+          effects: [E.meter("oncallLoad", 3)],
+          cause: "Game day postponed",
+        },
+      ],
+      ignoreHint: "On-call Load ↑",
+      ignoreEffects: [E.meter("oncallLoad", 4)],
+      ignoreCause: "The game day ran without a plan",
+    }),
+  },
+  {
+    id: "customer_escalation",
+    cat: "DELIVERY",
+    canBeRequired: true,
+    oncePer: "project",
+    weight: (s) => (s.week >= 3 && active(s).some((p) => s.engineers.some((e) => e.projectId === p.id)) ? 2 : 0),
+    setup: (ctx, rng) => {
+      const ps = active(ctx.s).filter((p) => voiceOf(ctx.s, p) && fresh(ctx.s, "customer_escalation", p.id));
+      if (!ps.length) return null;
+      const p = rng.pick(ps);
+      return { ...ctx, project: p, subject: voiceOf(ctx.s, p) };
+    },
+    build: ({ project: p, subject: e, pm }) => ({
+      from: pm.name,
+      fromRole: "Product Manager",
+      title: "A big customer found the bug",
+      body: `An enterprise customer hit a bug in ${p!.name} during their own launch. ${pm.name.split(" ")[0]} opened a shared Slack channel, and fourteen people joined in the first minute.`,
+      intents: [
+        {
+          id: "swarm",
+          label: "Swarm it with the whole team",
+          cost: 1,
+          hints: "PM Trust ↑ · Progress ↓ · Team Energy ↓",
+          effects: [E.trust("pm", 4), E.progress(p!.id, -8), E.team("energy", -1)],
+          cause: "Swarmed the customer bug",
+        },
+        {
+          id: "owner",
+          label: `${first(e!)} owns the fix`,
+          cost: 0,
+          hints: `PM Trust ↑ · ${first(e!)} Energy ↓`,
+          effects: [E.trust("pm", 2), E.attr(e!.id, "energy", -3)],
+          cause: `${first(e!)} fixed it for the customer`,
+        },
+        {
+          id: "workaround",
+          label: "Ship a documented workaround",
+          cost: 1,
+          hints: "Tech Debt ↑ · Reputation ↓",
+          effects: [E.meter("techDebt", 4), E.meter("reputation", -1)],
+          cause: "Workaround documented for the customer",
+        },
+      ],
+      ignoreHint: "PM Trust ↓↓ · Reputation ↓",
+      ignoreEffects: [E.trust("pm", -6), E.meter("reputation", -2)],
+      ignoreCause: "The customer escalated to the CEO",
+    }),
+  },
+  {
+    id: "okr_grades",
+    cat: "POLITICS",
+    canBeRequired: false,
+    oncePer: "quarter",
+    weight: (s) => (s.week >= 10 ? 3 : 0),
+    setup: (ctx) => ctx,
+    build: ({ skip }) => ({
+      from: skip.name,
+      fromRole: "Skip-level · quarter end",
+      title: "Grade your OKRs by Thursday",
+      body: `Every key result needs a number between 0 and 1. ${skip.name.split(" ")[0]} adds that 0.7 is “the new 1.0”.`,
+      intents: [
+        {
+          id: "story",
+          label: "Write the story behind each grade",
+          cost: 2,
+          hints: "Skip Trust ↑ · Packet evidence · Stress ↑",
+          effects: [E.trust("skip", 4), E.meter("packet", 1), E.meter("stress", 2)],
+          cause: "OKRs graded, with the story",
+        },
+        {
+          id: "honest",
+          label: "Grade them honestly",
+          cost: 1,
+          hints: "Reputation ↑ · Skip Trust ↓",
+          effects: [E.meter("reputation", 2), E.trust("skip", -1)],
+          cause: "Honest OKR grades",
+        },
+        {
+          id: "round",
+          label: "Round everything up to 0.7",
+          cost: 0,
+          hints: "Skip Trust ↑ · Trust risk",
+          effects: [E.trust("skip", 2), E.chance(0.6, "Nobody checked", [], [E.trust("skip", -5)], "Someone checked")],
+          cause: "OKRs rounded up",
+        },
+      ],
+      ignoreHint: "Skip Trust ↓",
+      ignoreEffects: [E.trust("skip", -4)],
+      ignoreCause: "Your OKRs were graded for you",
+    }),
+  },
+  {
+    id: "demo_day",
+    cat: "PEOPLE",
+    canBeRequired: false,
+    oncePer: "quarter",
+    weight: (s) => (s.projects.some(shipped) ? 2 : 0),
+    setup: (ctx) => {
+      const p = ctx.s.projects.find(shipped);
+      const e = by(ctx.s.engineers, (x) => x.attrs.ambition)[0];
+      return p && e ? { ...ctx, project: p, subject: e } : null;
+    },
+    build: ({ project: p, subject: e }) => ({
+      from: e!.name,
+      fromRole: levelTitle(e!),
+      title: "Can we demo it at all-hands?",
+      body: `${p!.name} shipped, and ${first(e!)} wants five minutes at all-hands to show it off. The agenda already runs forty minutes over.`,
+      intents: [
+        {
+          id: "slot",
+          label: "Get them the slot",
+          cost: 1,
+          hints: "Morale ↑ · Reputation ↑ · Political Capital ↓",
+          effects: [E.attr(e!.id, "morale", 2), E.meter("reputation", 2), E.meter("capital", -2)],
+          cause: "A demo at all-hands",
+        },
+        {
+          id: "video",
+          label: "Record a demo video instead",
+          cost: 1,
+          hints: "Reputation ↑ · Morale ↓",
+          effects: [E.meter("reputation", 1), E.attr(e!.id, "morale", -1)],
+          cause: "A demo video, recorded",
+        },
+        {
+          id: "no",
+          label: "Not this time",
+          cost: 0,
+          hints: "Time saved · Morale ↓",
+          effects: [E.attr(e!.id, "morale", -2)],
+          cause: "No demo this time",
+        },
+      ],
+      ignoreHint: "Morale ↓",
+      ignoreEffects: [E.attr(e!.id, "morale", -1)],
+      ignoreCause: "The demo request was left on read",
     }),
   },
 ];

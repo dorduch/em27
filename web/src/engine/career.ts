@@ -40,7 +40,7 @@ export function newQuarter(s: GameState): GameState {
         hire.tenure = "new";
         d.engineers.push(hire);
       }
-      d.projects = makeProjects(rng, d.company, d.level, d.nextId);
+      d.projects = makeProjects(rng, d.company, d.level, d.nextId, d.projects.map((p) => p.name));
       d.nextId += 10;
     }
     for (const e of d.engineers) {

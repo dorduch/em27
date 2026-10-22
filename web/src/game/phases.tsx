@@ -85,7 +85,8 @@ export function BackPageScreen({ s, onNext }: { s: GameState; onNext: () => void
   const rows: { subject: string; delta: number; why: string }[] = [];
   const grouped = new Map<string, { attr: string; delta: number; why: string; n: number }>();
   for (const c of w.causes) {
-    if (projects.length && c.subject.endsWith(" progress")) continue; // covered by the project rows
+    // The project rows show the team's weekly output; progress your decisions added or cost stays in the list.
+    if (projects.length && c.subject.endsWith(" progress") && c.why.endsWith(" on the work")) continue;
     const m = c.subject.match(/^(.+)’s (Morale|Energy|Loyalty|Coding|Debugging|Communication|Ambition)$/);
     if (m) {
       const key = `${m[2]}|${c.delta}|${c.why}`;

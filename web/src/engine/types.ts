@@ -62,6 +62,8 @@ export interface Project {
   dueWeek: number;
   flagship: boolean;
   status: "active" | "shipped" | "late-shipped" | "missed";
+  /** A follow-on that arrived mid-quarter: it can only raise the delivery score, and it never misses. */
+  stretch?: boolean;
 }
 
 export interface Stakeholder {
@@ -108,10 +110,12 @@ export type Effect =
   | { k: "keep"; factId: string }
   | { k: "break"; factId: string }
   | { k: "scout"; who: string; d: number }
-  | { k: "leave"; who: string }
+  | { k: "leave"; who: string; how?: "quit" | "cut" | "transfer" }
+  | { k: "away"; who: string } // steps off their project and the pager for a while (a loan, a week off)
+  | { k: "assign"; who: string; project: string } // put someone (back) on an active project
   | { k: "hire" }
   | { k: "settle"; type: string } // the situation behind an event type is dealt with: it won't come back this quarter
-  | { k: "chance"; p: number; then: Effect[]; else?: Effect[]; note: string }
+  | { k: "chance"; p: number; then: Effect[]; else?: Effect[]; note: string; miss?: string } // miss: narrated when the roll fails
   | { k: "teamAttr"; attr: AttrKey; d: number }
   | { k: "levelUp"; who: string }
   // Storyline effects: only act when the item belongs to a storyline.
