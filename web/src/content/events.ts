@@ -65,6 +65,13 @@ export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.mi
 export const loyaltyOdds = (e: Engineer, base: number) => clamp(base + e.loyalty / 25, 0.15, 0.92);
 const seenThisQuarter = (s: GameState, id: string) => (s.quarterEvents ?? []).includes(id);
 export const projectOf = (s: GameState, e: Engineer) => s.projects.find((p) => p.id === e.projectId && p.status === "active");
+/** The best communicator staffed on a project: who you'd send to negotiate or demo it. */
+const voiceOf = (s: GameState, p: Project) => by(s.engineers.filter((e) => e.projectId === p.id), (e) => e.attrs.communication)[0];
+const shipped = (p: Project) => p.status === "shipped" || p.status === "late-shipped";
+/** Behind its straight-line schedule: the only state in which "the estimate was a belief" is true. */
+const behind = (p: Project, week: number) => p.progress < expectedProgress(p, week);
+/** The player dealt with the situation, so the event stays away for the rest of the quarter. */
+const settle = (type: string): Effect => ({ k: "settle", type });
 
 export const E = {
   attr: (who: string, attr: "coding" | "debugging" | "communication" | "ambition" | "morale" | "energy", d: number): Effect => ({ k: "attr", who, attr, d }),
@@ -190,9 +197,10 @@ export const EVENT_TYPES: EventType[] = [
     cat: "PEOPLE",
     canBeRequired: false,
     oncePer: "subject",
-    weight: (s) => (s.engineers.some((e) => e.attrs.coding <= 11) ? 2 : 0),
+    // Rolling tickets need tickets: only someone staffed on an active project.
+    weight: (s) => (s.engineers.some((e) => e.attrs.coding <= 11 && projectOf(s, e)) ? 2 : 0),
     setup: (ctx) => {
-      const e = by(ctx.s.engineers, (x) => -x.attrs.coding)[0];
+      const e = by(ctx.s.engineers.filter((x) => projectOf(ctx.s, x)), (x) => -x.attrs.coding)[0];
       return e && e.attrs.coding <= 11 ? { ...ctx, subject: e } : null;
     },
     build: ({ subject: e, s }) => ({
@@ -293,12 +301,13 @@ export const EVENT_TYPES: EventType[] = [
     id: "scope_creep",
     cat: "DELIVERY",
     canBeRequired: true,
+    oncePer: "project", // the same "live dashboard for the demo" only lands once on a project
     weight: (s) => (active(s).length ? 3 : 0),
     setup: (ctx, rng) => {
       const ps = active(ctx.s);
       if (!ps.length) return null;
-      const helper = by(ctx.s.engineers, (e) => e.attrs.communication)[0];
-      return { ...ctx, project: rng.pick(ps), subject: helper };
+      const p = rng.pick(ps);
+      return { ...ctx, project: p, subject: voiceOf(ctx.s, p) };
     },
     build: ({ project: p, pm, subject: h }) => ({
       from: pm.name,
@@ -354,7 +363,8 @@ export const EVENT_TYPES: EventType[] = [
       return e ? { ...ctx, subject: e, project: p } : null;
     },
     build: ({ subject: e, project: p, s }) => {
-      const fix: Effect[] = [E.meter("techDebt", -12), ...(p ? [E.progress(p.id, -6)] : [])];
+      // Fixing it, or promising to, settles the build for the quarter: the promise brings it back when due.
+      const fix: Effect[] = [E.meter("techDebt", -12), ...(p ? [E.progress(p.id, -6)] : []), settle("tech_debt")];
       return {
         from: e!.name,
         fromRole: levelTitle(e!),
@@ -383,6 +393,7 @@ export const EVENT_TYPES: EventType[] = [
                 payload: fix,
                 payloadHint: `Tech Debt ↓↓${p ? " · Progress ↓" : ""}`,
               },
+              settle("tech_debt"),
             ],
             cause: "Build fix promised for later",
           },
@@ -398,9 +409,10 @@ export const EVENT_TYPES: EventType[] = [
     cat: "DELIVERY",
     canBeRequired: true,
     oncePer: "project",
-    weight: (s) => (s.week < 3 ? 0 : active(s).some((p) => p.progress < expectedProgress(p, s.week)) ? 4 : 1),
+    // Only a project that is actually behind its schedule; one that is ahead gets no crisis.
+    weight: (s) => (s.week >= 3 && active(s).some((p) => behind(p, s.week)) ? 4 : 0),
     setup: (ctx) => {
-      const ps = active(ctx.s);
+      const ps = active(ctx.s).filter((p) => behind(p, ctx.s.week));
       if (!ps.length) return null;
       const p = by(ps, (x) => expectedProgress(x, ctx.s.week) - x.progress)[0];
       return { ...ctx, project: p };
@@ -461,6 +473,7 @@ export const EVENT_TYPES: EventType[] = [
     id: "dependency_late",
     cat: "DELIVERY",
     canBeRequired: false,
+    oncePer: "project", // one late endpoint per project; a workaround is not built twice
     weight: (s) => (active(s).length ? 2 : 0),
     setup: (ctx, rng) => {
       const ps = active(ctx.s);
@@ -506,10 +519,11 @@ export const EVENT_TYPES: EventType[] = [
     id: "slop_pr",
     cat: "DELIVERY",
     canBeRequired: false,
-    weight: (s) => (s.engineers.some((e) => e.attrs.ambition >= 12 && e.attrs.debugging <= 11) && s.engineers.length >= 3 ? 2 : 0),
+    // The PR is for a project the author is staffed on. A PR-size rule settles it for the quarter.
+    weight: (s) => (s.engineers.some((e) => e.attrs.ambition >= 12 && e.attrs.debugging <= 11 && projectOf(s, e)) && s.engineers.length >= 3 ? 2 : 0),
     setup: (ctx) => {
       const a = by(
-        ctx.s.engineers.filter((e) => e.attrs.ambition >= 12 && e.attrs.debugging <= 11),
+        ctx.s.engineers.filter((e) => e.attrs.ambition >= 12 && e.attrs.debugging <= 11 && projectOf(ctx.s, e)),
         (e) => e.attrs.ambition,
       )[0];
       const o = by(
@@ -517,7 +531,7 @@ export const EVENT_TYPES: EventType[] = [
         (e) => e.attrs.debugging,
       )[0];
       if (!a || !o) return null;
-      return { ...ctx, subject: a, other: o, project: projectOf(ctx.s, a) ?? active(ctx.s)[0] };
+      return { ...ctx, subject: a, other: o, project: projectOf(ctx.s, a) };
     },
     build: ({ subject: a, other: o, project: p }) => ({
       from: a!.name,
@@ -538,7 +552,7 @@ export const EVENT_TYPES: EventType[] = [
           label: "Block it and set a PR-size rule",
           cost: 1,
           hints: `${first(a!)} Morale ↓ · Tech Debt ↓`,
-          effects: [E.attr(a!.id, "morale", -2), E.attr(o!.id, "morale", 1), E.meter("techDebt", -3)],
+          effects: [E.attr(a!.id, "morale", -2), E.attr(o!.id, "morale", 1), E.meter("techDebt", -3), settle("slop_pr")],
           cause: "PR-size rule introduced",
         },
         {
@@ -564,7 +578,8 @@ export const EVENT_TYPES: EventType[] = [
       s.company === "Vercel" && s.week < 8 && s.projects.some((p) => p.flagship && p.status === "active") && !seenThisQuarter(s, "keynote_oneup") ? 3 : 0,
     setup: (ctx) => {
       const p = ctx.s.projects.find((x) => x.flagship && x.status === "active");
-      const e = by(ctx.s.engineers, (x) => x.attrs.communication)[0];
+      // Someone on the flagship demos it; anyone can step in if nobody is staffed.
+      const e = p && (voiceOf(ctx.s, p) ?? by(ctx.s.engineers, (x) => x.attrs.communication)[0]);
       return p && e ? { ...ctx, project: p, subject: e } : null;
     },
     build: ({ project: p, subject: e }) => ({
@@ -600,7 +615,7 @@ export const EVENT_TYPES: EventType[] = [
       ],
       ignoreHint: "Scope ↑↑ · Skip Trust ↓",
       ignoreEffects: [E.scope(p!.id, 20), E.trust("skip", -2)],
-      ignoreCause: "The CEO scoped the response himself",
+      ignoreCause: "The CEO scoped the response personally",
     }),
   },
   {
@@ -752,13 +767,18 @@ export const EVENT_TYPES: EventType[] = [
     id: "peer_credit",
     cat: "POLITICS",
     canBeRequired: false,
-    weight: (s) => 2 * (s.company === "Google" ? 1.4 : 1),
-    setup: (ctx) => ctx,
-    build: ({ peer }) => ({
+    // Credit needs a launch to steal: once per project your team shipped this quarter.
+    oncePer: "project",
+    weight: (s) => (s.projects.some(shipped) ? 2 * (s.company === "Google" ? 1.4 : 1) : 0),
+    setup: (ctx) => {
+      const p = ctx.s.projects.find((x) => shipped(x) && !ctx.s.quarterEvents.includes(`peer_credit@${x.id}`));
+      return p ? { ...ctx, project: p } : null;
+    },
+    build: ({ peer, project: p }) => ({
       from: peer.name,
       fromRole: "Peer EM",
       title: "“Great collab, team!”",
-      body: `${peer.name.split(" ")[0]}’s all-hands slide shows your team’s launch under their team’s name. Several people reacted with the rocket emoji.`,
+      body: `${peer.name.split(" ")[0]}’s all-hands slide shows ${p!.name} under their team’s name. Several people reacted with the rocket emoji.`,
       intents: [
         {
           id: "confront",

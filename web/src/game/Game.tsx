@@ -94,7 +94,15 @@ export default function Game() {
   /** Ask the AI director for next week's demands while Friday plays. Never blocks the game. */
   const askDirector = useCallback(async (s: GameState) => {
     const brief = directorBrief(s);
-    if (!brief) return;
+    if (!brief) {
+      setDirectorStatus("");
+      return;
+    }
+    // Scheduled storyline beats and promises already fill next week: nothing for the director to pick.
+    if (brief.pick === 0) {
+      setDirectorStatus("Nothing to pick: storylines and promises already fill this week’s inbox.");
+      return;
+    }
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 12_000);
     try {
@@ -111,12 +119,15 @@ export default function Game() {
       }
       // Only apply to the same week, and only before Monday's inbox exists.
       const current = gameRef.current;
-      const result = current && current.quarter === s.quarter && current.week === s.week ? applyDirectorPlan(current, body.plan as DirectorPlan) : null;
+      const sameWeek = current && current.quarter === s.quarter && current.week === s.week;
+      const result = sameWeek ? applyDirectorPlan(current, body.plan as DirectorPlan) : null;
       if (result?.accepted) {
         setGame(result.state);
         setDirectorStatus("");
+      } else if (!sameWeek || current.phase === "plan") {
+        setDirectorStatus("Random draw: the director answered after Monday’s inbox was built.");
       } else {
-        setDirectorStatus("Random draw: the director's picks didn't pass validation, or arrived after Monday.");
+        setDirectorStatus("Random draw: the director’s picks didn’t pass the engine’s validation.");
       }
     } catch {
       setDirectorStatus("Random draw: the director didn't answer in time.");

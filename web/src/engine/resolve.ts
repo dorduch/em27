@@ -3,7 +3,7 @@
 import { COMPANIES, KEYNOTE_WEEK } from "@/content/companies";
 import { TRAIT_LABEL } from "@/content/people";
 import { beatCtx, storylineById } from "@/content/storylines";
-import { baseCtx, fillInbox, now, rememberTypes } from "./inbox";
+import { baseCtx, fillInbox, now, rememberTypes, settledKey } from "./inbox";
 import {
   capacityFor,
   FOCUS_RELIEF,
@@ -244,6 +244,11 @@ class Resolver {
         case "hire":
           this.hires++;
           break;
+        case "settle": {
+          const key = settledKey(ef.type);
+          if (!this.d.quarterEvents.includes(key)) this.d.quarterEvents.push(key);
+          break;
+        }
         case "levelUp": {
           const e = this.eng(ef.who);
           if (e && e.level < 7) {

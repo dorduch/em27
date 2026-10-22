@@ -375,7 +375,8 @@ const burnout: Storyline = {
         return {
           from: e.name,
           fromRole: levelTitle(e),
-          title: "The pager is still in my dreams",
+          // The pager only haunts the person who carries it.
+          title: onCall ? "The pager is still in my dreams" : "“I’m fine”, at 02:14",
           body: `“I’m fine” arrives at 02:14. ${first(e)}’s Energy is ${e.attrs.energy}/20${p ? ` and ${first(e)} is still on ${p.name}` : ""}${onCall ? ", and on call this week" : ""}.`,
           intents: [
             {
@@ -394,14 +395,18 @@ const burnout: Storyline = {
               effects: [E.attr(e.id, "energy", 4), ...(p ? [E.progress(p.id, -6)] : [E.attr(e.id, "morale", -1)]), next("checkpoint", 1, 2)],
               cause: "Moved off the critical path",
             },
-            {
-              id: "pager",
-              label: "Take them off the pager for a month",
-              cost: 0,
-              hints: "Energy ↑ · On-call Load ↑",
-              effects: [E.attr(e.id, "energy", 2), E.meter("oncallLoad", 6), next("checkpoint", 2, 3)],
-              cause: "Off the pager for a month",
-            },
+            ...(onCall
+              ? [
+                  {
+                    id: "pager",
+                    label: "Take them off the pager for a month",
+                    cost: 0,
+                    hints: "Energy ↑ · On-call Load ↑",
+                    effects: [E.attr(e.id, "energy", 2), E.meter("oncallLoad", 6), next("checkpoint", 2, 3)],
+                    cause: "Off the pager for a month",
+                  },
+                ]
+              : []),
           ],
           ignoreHint: "Energy ↓ · Burnout risk",
           ignoreEffects: [E.attr(e.id, "energy", -2), E.attr(e.id, "morale", -1), next("slipping", 1, 1)],

@@ -21,6 +21,8 @@ function states(): GameState[] {
       s = { ...s, stats: { ...s.stats, incidents: 2 } };
       while (s.phase !== "review") {
         out.push(s);
+        // The passive policy rarely ships, so also cover the same week with a launch behind it.
+        if (s.week >= 7) out.push({ ...s, projects: s.projects.map((p, i) => (i === 0 ? { ...p, status: "shipped" as const, progress: p.scope } : p)) });
         const req = blockingItem(s);
         if (req) s = choose(s, req.id, req.intents[0].id);
         s = advanceFromBackPage(finishFriday(resolveWeek(s)));
@@ -179,5 +181,97 @@ describe("forecast", () => {
     const moved = forecastMove({ ...s, projects: [p, ...s.projects.slice(1)], engineers: eng, techDebt: 0, week: 3 }, eng[0].id, s.projects[1].id);
     expect(moved[p.id].weekly).toBe(10);
     expect(moved[s.projects[1].id].team).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("event premises", () => {
+  const pool = async (s: GameState) => (await import("./inbox")).candidatePool(s).map((c) => c.type.id);
+  /** Week 5 of a fresh game with every project ahead of schedule and fully staffed. */
+  const base = (company: CompanyId = "Stripe") => {
+    const s = newGame(company, 11);
+    return {
+      ...s,
+      week: 5,
+      phase: "plan" as const,
+      projects: s.projects.map((p) => ({ ...p, progress: Math.min(p.scope - 1, 90) })),
+    };
+  };
+  const pick = (s: GameState, id: string) => EVENT_TYPES.find((t) => t.id === id)!.setup(ctxFor(s), makeRng(3, id));
+
+  it("only offers a blown estimate for a project that is actually behind", () => {
+    const ahead = base();
+    expect(pick(ahead, "estimate_blown")).toBeNull();
+    expect(EVENT_TYPES.find((t) => t.id === "estimate_blown")!.weight(ahead)).toBe(0);
+    const late = { ...ahead, projects: ahead.projects.map((p, i) => (i === 1 ? { ...p, progress: 0 } : p)) };
+    expect(pick(late, "estimate_blown")?.project?.id).toBe(late.projects[1].id);
+  });
+
+  it("needs active projects for rolling tickets and giant PRs", () => {
+    const s = base();
+    const idle = { ...s, projects: s.projects.map((p) => ({ ...p, status: "shipped" as const, progress: p.scope })) };
+    expect(pick(idle, "underperformer")).toBeNull();
+    expect(pick(idle, "slop_pr")).toBeNull();
+  });
+
+  it("credits a peer only for a launch you shipped, named, once per project", async () => {
+    const s = base();
+    expect(pick(s, "peer_credit")).toBeNull();
+    const launched = { ...s, projects: s.projects.map((p, i) => (i === 0 ? { ...p, status: "shipped" as const, progress: p.scope } : p)) };
+    const ctx = pick(launched, "peer_credit")!;
+    expect(EVENT_TYPES.find((t) => t.id === "peer_credit")!.build(ctx).body).toContain(launched.projects[0].name);
+    expect(await pool({ ...launched, quarterEvents: [`peer_credit@${launched.projects[0].id}`] })).not.toContain("peer_credit");
+  });
+
+  it("sends someone staffed on the project to negotiate scope or demo the flagship", () => {
+    for (const [company, id] of [["Stripe", "scope_creep"], ["Vercel", "keynote_oneup"]] as const) {
+      const ctx = pick({ ...base(company), week: 3 }, id)!;
+      expect(ctx.subject?.projectId).toBe(ctx.project!.id);
+    }
+  });
+
+  it("settles the build for the quarter once it is fixed or promised", async () => {
+    let s: GameState = base();
+    const build = EVENT_TYPES.find((t) => t.id === "tech_debt")!;
+    const body = build.build(build.setup(ctxFor(s), makeRng(1, "tech_debt"))!);
+    for (const intent of ["approve", "later"]) {
+      const effects = body.intents.find((i) => i.id === intent)!.effects;
+      expect(effects).toContainEqual({ k: "settle", type: "tech_debt" });
+    }
+    s = { ...s, inbox: [{ ...body, id: "i1", type: "tech_debt", cat: "DELIVERY", required: false }] };
+    s = choose(s, "i1", "approve");
+    const after = advanceFromBackPage(finishFriday(resolveWeek(s)));
+    expect(after.quarterEvents).toContain("tech_debt@settled");
+    expect(await pool(after)).not.toContain("tech_debt");
+  });
+
+  it("only blames the pager on the person who carries it", async () => {
+    const { beatCtx } = await import("@/content/storylines");
+    const burnout = STORYLINES.find((x) => x.id === "burnout")!;
+    const s = base();
+    const e = { ...s.engineers[0], attrs: { ...s.engineers[0].attrs, energy: 8 } };
+    const at = (oncallId: string | null) => {
+      const st = { ...s, engineers: [e, ...s.engineers.slice(1)], plan: { ...s.plan, oncallId } };
+      return burnout.beats.signs.build(beatCtx({ ...ctxFor(st), subject: e }, { storyline: "burnout", subjectId: e.id, flags: [] })!);
+    };
+    expect(at(e.id).title).toContain("pager");
+    expect(at(e.id).intents.map((i) => i.id)).toContain("pager");
+    const off = at(s.engineers[1].id);
+    expect(off.title).not.toContain("pager");
+    expect(off.intents.map((i) => i.id)).not.toContain("pager");
+  });
+
+  it("tells the director who is on call and who works on what", async () => {
+    const { directorBrief } = await import("./director");
+    let s = newGame("Stripe", 31);
+    const req = blockingItem(s)!;
+    s = resolveWeek(choose(s, req.id, req.intents[0].id));
+    const brief = directorBrief(s)!;
+    const oncall = s.engineers.find((e) => e.id === s.plan.oncallId)!;
+    expect(brief.onCall).toBe(oncall.name);
+    expect(brief.team.filter((t) => t.onCall).map((t) => t.name)).toEqual([oncall.name]);
+    for (const p of brief.projects.filter((x) => x.status === "active")) {
+      expect(p.staff.length).toBeGreaterThan(0);
+      expect(p.forecastFinishWeek).not.toBeUndefined();
+    }
   });
 });

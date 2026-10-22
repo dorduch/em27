@@ -54,9 +54,13 @@ function oneOffKey(type: string, week: number, subjectId?: string, projectId?: s
   return `${type}@w${week}`;
 }
 
+/** Recorded in quarterEvents by a "settle" effect: the player dealt with it, so it stays away this quarter. */
+export const settledKey = (type: string) => `${type}@settled`;
+
 /** A one-off without a fixed rhythm needs a three-week gap before it can come back. */
 const GAP = 3;
 function tooSoon(s: GameState, type: string, subjectId?: string, projectId?: string): boolean {
+  if (s.quarterEvents.includes(settledKey(type))) return true;
   if (s.quarterEvents.includes(oneOffKey(type, s.week, subjectId, projectId))) return true;
   if (EVENT_TYPES.find((t) => t.id === type)?.oncePer) return false;
   for (let w = s.week - GAP; w < s.week; w++) if (s.quarterEvents.includes(`${type}@w${w}`)) return true;

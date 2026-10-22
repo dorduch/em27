@@ -3,6 +3,7 @@
 
 import { expectedProgress } from "@/content/events";
 import { STORYLINES } from "@/content/storylines";
+import { forecastAll } from "./forecast";
 import { candidatePool, now, regularQuota, rememberTypes, settleArcs, validatePlan } from "./inbox";
 import { produce } from "./plan";
 import type { DirectorPlan, GameState } from "./types";
@@ -34,8 +35,11 @@ export interface DirectorBrief {
   company: string;
   level: string;
   pick: number;
-  projects: { name: string; percent: number; expectedPercent: number; dueWeek: number; status: string; flagship: boolean }[];
-  team: { name: string; morale: number; energy: number; loyalty: number | null; traits: string[]; project: string | null }[];
+  /** `staff` is who works on it; `forecastFinishWeek` is when it ships at current staffing (null: never). */
+  projects: { name: string; percent: number; expectedPercent: number; dueWeek: number; status: string; flagship: boolean; staff: string[]; forecastFinishWeek: number | null }[];
+  team: { name: string; morale: number; energy: number; loyalty: number | null; traits: string[]; project: string | null; onCall: boolean }[];
+  /** Who carries the pager next week, or null when nobody does. */
+  onCall: string | null;
   trust: Record<string, number>;
   meters: { techDebt: number; oncallLoad: number; stress: number; reputation: number };
   openPromises: { text: string; dueWeek: number }[];
@@ -54,6 +58,8 @@ export function directorBrief(s: GameState): DirectorBrief | null {
   if (!next) return null;
   const pool = candidatePool(next);
   const projectName = (id: string | null) => next.projects.find((p) => p.id === id)?.name ?? null;
+  const forecasts = forecastAll(next);
+  const oncallId = next.plan.oncallId;
   return {
     quarter: next.quarter,
     week: next.week,
@@ -67,6 +73,8 @@ export function directorBrief(s: GameState): DirectorBrief | null {
       dueWeek: p.dueWeek,
       status: p.status,
       flagship: p.flagship,
+      staff: p.status === "active" ? next.engineers.filter((e) => e.projectId === p.id).map((e) => e.name) : [],
+      forecastFinishWeek: forecasts[p.id]?.finishWeek ?? null,
     })),
     team: next.engineers.map((e) => ({
       name: e.name,
@@ -75,7 +83,9 @@ export function directorBrief(s: GameState): DirectorBrief | null {
       loyalty: e.loyaltyKnown ? e.loyalty : null,
       traits: e.revealed,
       project: projectName(e.projectId),
+      onCall: e.id === oncallId,
     })),
+    onCall: next.engineers.find((e) => e.id === oncallId)?.name ?? null,
     trust: Object.fromEntries(next.stakeholders.map((x) => [x.role, x.trust])),
     meters: { techDebt: next.techDebt, oncallLoad: next.oncallLoad, stress: next.stress, reputation: next.reputation },
     openPromises: next.facts.filter((f) => f.status === "open").map((f) => ({ text: f.text, dueWeek: f.dueWeek })),

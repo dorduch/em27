@@ -24,7 +24,12 @@ Aim for a quarter that feels like a story:
 - Must-respond: choose exactly one picked candidate with canBeMustRespond=true as the must-respond demand: the one with the highest stakes this week.
 - Company flavor: Vercel builds toward a fixed keynote in week 8; Stripe treats incidents and reliability as sacred; Google runs on promo packets and politics.
 
-Write each reason as one short sentence (under 16 words) for a game designer reading a debug view. A reason may only cite facts that appear in the brief, and only about that candidate's own person, sender or project; never attribute a number to someone else. Write arcNote as one sentence on where the quarter is heading.`;
+Ground every pick in the brief:
+- Who carries the pager is onCall (and team[].onCall). Only someone on call can be haunted by the pager.
+- Who works on a project is projects[].staff. Never place a person on a project they are not staffed on.
+- A project is behind only when forecastFinishWeek is later than dueWeek, or percent is below expectedPercent. Don't describe an on-track project as slipping or blown.
+
+Write each reason as one short sentence (under 16 words) for a game designer reading a debug view. A reason may only cite facts that appear in the brief, and only about that candidate's own person, sender or project; never attribute a number to someone else. Refer to people by name or as "they"; never guess anyone's gender or use he/she/him/her. Write arcNote as one sentence on where the quarter is heading.`;
 
 function schemaFor(brief: DirectorBrief) {
   const ids = brief.candidates.map((c) => c.id) as [string, ...string[]];

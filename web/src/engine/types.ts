@@ -110,6 +110,7 @@ export type Effect =
   | { k: "scout"; who: string; d: number }
   | { k: "leave"; who: string }
   | { k: "hire" }
+  | { k: "settle"; type: string } // the situation behind an event type is dealt with: it won't come back this quarter
   | { k: "chance"; p: number; then: Effect[]; else?: Effect[]; note: string }
   | { k: "teamAttr"; attr: AttrKey; d: number }
   | { k: "levelUp"; who: string }
