@@ -10,6 +10,9 @@ import type { DirectorBrief } from "@/engine/director";
 const MODEL = process.env.DIRECTOR_MODEL ?? "claude-haiku-5-5";
 const MAX_BODY = 24_000;
 const ID_PATTERN = /^[a-z0-9_]+:\d$/;
+// Output caps keep the route from working as a general-purpose LLM proxy.
+const MAX_REASON = 120;
+const MAX_ARC_NOTE = 200;
 
 // Stable, cacheable instructions. Keep volatile data out of this string.
 const SYSTEM = `You are the director of EM27, a Championship Manager-style game where the player is an engineering manager.
@@ -30,12 +33,18 @@ function schemaFor(brief: DirectorBrief) {
   const ids = brief.candidates.map((c) => c.id) as [string, ...string[]];
   return z.object({
     picks: z
-      .array(z.object({ id: z.enum(ids), reason: z.string() }))
+      .array(z.object({ id: z.enum(ids), reason: z.string().max(MAX_REASON) }))
       .describe(`Exactly ${brief.pick} candidates with different event types, in the order the player should see them.`),
     mustRespondId: z.enum(ids).describe("One of the picked ids whose candidate has canBeMustRespond=true."),
-    arcNote: z.string(),
+    arcNote: z.string().max(MAX_ARC_NOTE),
   });
 }
+
+// Every free-text field reaches the prompt, so each one is short and every list is small:
+// real game content fits easily, a smuggled prompt does not.
+const short = (v: unknown, n = 60) => typeof v === "string" && v.length <= n;
+const list = (v: unknown, max: number): v is unknown[] => Array.isArray(v) && v.length <= max;
+const shorts = (v: unknown, max: number, n: number) => list(v, max) && v.every((s) => short(s, n));
 
 function isBrief(b: unknown): b is DirectorBrief {
   const x = b as DirectorBrief;
@@ -46,10 +55,47 @@ function isBrief(b: unknown): b is DirectorBrief {
     Number.isInteger(x.pick) &&
     x.pick > 0 &&
     x.pick <= 8 &&
+    short(x.company) &&
+    short(x.level) &&
     Array.isArray(x.candidates) &&
     x.candidates.length > 0 &&
     x.candidates.length <= 40 &&
-    x.candidates.every((c) => typeof c.id === "string" && ID_PATTERN.test(c.id))
+    x.candidates.every(
+      (c) =>
+        typeof c.id === "string" &&
+        ID_PATTERN.test(c.id) &&
+        short(c.type) &&
+        short(c.category) &&
+        short(c.title, 160) &&
+        short(c.from) &&
+        (c.person === null || short(c.person?.name)) &&
+        (c.project === null || short(c.project)),
+    ) &&
+    list(x.projects, 10) &&
+    x.projects.every((p) => short(p.name) && short(p.status)) &&
+    list(x.team, 12) &&
+    x.team.every((t) => short(t.name) && shorts(t.traits, 8, 30) && (t.project === null || short(t.project))) &&
+    !!x.trust &&
+    typeof x.trust === "object" &&
+    Object.keys(x.trust).length <= 10 &&
+    Object.keys(x.trust).every((k) => short(k, 30)) &&
+    list(x.openPromises, 12) &&
+    x.openPromises.every((p) => short(p.text, 200)) &&
+    (x.lastWeek === null || shorts(x.lastWeek?.biggestChanges, 6, 200)) &&
+    shorts(x.recentEventTypes, 40, 60) &&
+    list(x.storylines, 12) &&
+    x.storylines.every((s) => short(s.title, 80) && short(s.person) && short(s.beat)) &&
+    (x.midQuarterFocus === null || short(x.midQuarterFocus))
+  );
+}
+
+// The host's own client address. The first x-forwarded-for entry is whatever the caller sent,
+// so fall back to the last one (added by the nearest proxy) when x-real-ip is missing.
+function clientIp(req: Request): string {
+  return (
+    req.headers.get("x-real-ip")?.trim() ||
+    req.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() ||
+    "local"
   );
 }
 
@@ -66,8 +112,7 @@ function rateLimited(ip: string): boolean {
 const fallback = (reason: string, status = 503) => Response.json({ fallback: "random", reason }, { status });
 
 export async function POST(req: Request) {
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
-  if (rateLimited(ip)) return fallback("Rate limited", 429);
+  if (rateLimited(clientIp(req))) return fallback("Rate limited", 429);
 
   const raw = await req.text();
   if (raw.length > MAX_BODY) return fallback("Request too large", 413);
@@ -83,7 +128,7 @@ export async function POST(req: Request) {
     const client = new Anthropic({ timeout: 15_000, maxRetries: 1 });
     const response = await client.messages.parse({
       model: MODEL,
-      max_tokens: 2000,
+      max_tokens: 1000,
       system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
       messages: [
         {
@@ -102,8 +147,9 @@ export async function POST(req: Request) {
         week: brief.week,
         picks: out.picks.map((p) => p.id),
         requiredId: out.mustRespondId,
-        rationale: Object.fromEntries(out.picks.map((p) => [p.id, p.reason])),
-        arcNote: out.arcNote,
+        // Clip again in case the schema's maxLength isn't enforced on the model side.
+        rationale: Object.fromEntries(out.picks.map((p) => [p.id, p.reason.slice(0, MAX_REASON)])),
+        arcNote: out.arcNote.slice(0, MAX_ARC_NOTE),
       },
       usage: {
         input: response.usage.input_tokens,
