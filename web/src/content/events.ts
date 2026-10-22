@@ -66,11 +66,13 @@ export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.mi
 export const loyaltyOdds = (e: Engineer, base: number) => clamp(base + e.loyalty / 25, 0.15, 0.92);
 const seenThisQuarter = (s: GameState, id: string) => (s.quarterEvents ?? []).includes(id);
 export const projectOf = (s: GameState, e: Engineer) => s.projects.find((p) => p.id === e.projectId && p.status === "active");
-/** The best communicator staffed on a project: who you'd send to negotiate or demo it. */
-const voiceOf = (s: GameState, p: Project) => by(s.engineers.filter((e) => e.projectId === p.id), (e) => e.attrs.communication)[0];
+/** Too tired to be handed one more thing: helper options skip them. */
+const spent = (e: Engineer) => e.attrs.energy <= 8;
+/** The best communicator staffed on a project, with energy to spare: who you'd send to negotiate or demo it. */
+const voiceOf = (s: GameState, p: Project) => by(s.engineers.filter((e) => e.projectId === p.id && !spent(e)), (e) => e.attrs.communication)[0];
 const shipped = (p: Project) => p.status === "shipped" || p.status === "late-shipped";
 /** Behind as the Projects screen shows it: at current staffing it won’t ship by its due week. */
-const behind = (s: GameState, p: Project) => ["behind", "stalled"].includes(forecast(p, s.engineers, s.techDebt, s.week).kind);
+const behind = (s: GameState, p: Project) => !p.stretch && ["behind", "stalled"].includes(forecast(p, s.engineers, s.techDebt, s.week).kind);
 /** The player dealt with the situation, so the event stays away for the rest of the quarter. */
 const settle = (type: string): Effect => ({ k: "settle", type });
 /** Not yet used this quarter for this person or project (see EventType.oncePer), so setup never picks a spent target. */
@@ -628,9 +630,10 @@ export const EVENT_TYPES: EventType[] = [
     cat: "DELIVERY",
     canBeRequired: false,
     oncePer: "quarter",
-    weight: (s) => (s.company === "Stripe" && s.stats.incidents > 0 && !!s.plan.oncallId && !seenThisQuarter(s, "postmortem_name") ? 2 : 0),
+    // Only after a real escalation last Friday, and the name in bold is whoever carried the pager then.
+    weight: (s) => (s.company === "Stripe" && s.lastWeek?.incident?.escalated && !seenThisQuarter(s, "postmortem_name") ? 3 : 0),
     setup: (ctx) => {
-      const e = ctx.s.engineers.find((x) => x.id === ctx.s.plan.oncallId);
+      const e = ctx.s.engineers.find((x) => x.id === ctx.s.lastWeek?.incident?.oncallId);
       return e ? { ...ctx, subject: e } : null;
     },
     build: ({ subject: e, s }) => ({
@@ -913,7 +916,7 @@ export const EVENT_TYPES: EventType[] = [
     cat: "POLITICS",
     canBeRequired: true,
     oncePer: "quarter",
-    weight: (s) => (s.week >= 7 && s.week <= 11 ? 3 : 0),
+    weight: (s) => (s.week >= 7 ? 3 : 0),
     setup: (ctx) => ctx,
     build: ({ skip }) => ({
       from: skip.name,
@@ -1045,7 +1048,7 @@ export const EVENT_TYPES: EventType[] = [
     cat: "PEOPLE",
     canBeRequired: true,
     oncePer: "quarter",
-    weight: (s) => (s.week >= 8 && s.week <= 11 ? 3 : 0),
+    weight: (s) => (s.week >= 8 ? 3 : 0),
     setup: (ctx) => ctx,
     build: ({ s }) => ({
       from: "People Ops",
@@ -1090,7 +1093,7 @@ export const EVENT_TYPES: EventType[] = [
     oncePer: "quarter",
     weight: (s) => (s.week >= 4 && s.oncallLoad >= 35 ? 2 : 0),
     setup: (ctx) => {
-      const e = by(ctx.s.engineers, (x) => x.attrs.debugging)[0];
+      const e = by(ctx.s.engineers.filter((x) => !spent(x)), (x) => x.attrs.debugging)[0];
       return e ? { ...ctx, subject: e, project: active(ctx.s)[0] } : null;
     },
     build: ({ subject: e, project: p }) => ({
@@ -1221,13 +1224,58 @@ export const EVENT_TYPES: EventType[] = [
     }),
   },
   {
+    id: "self_review",
+    cat: "POLITICS",
+    canBeRequired: true,
+    oncePer: "quarter",
+    weight: (s) => (s.week >= 11 ? 4 : 0),
+    setup: (ctx) => ctx,
+    build: ({ skip }) => ({
+      from: skip.name,
+      fromRole: "Skip-level · your review",
+      title: "Your self-review is due",
+      body: `Before Friday’s conversation, ${skip.name.split(" ")[0]} wants your own view of the quarter: what shipped, what didn’t, and what you’d do differently. Two pages, max.`,
+      intents: [
+        {
+          id: "evidence",
+          label: "Write it with evidence: launches, numbers, people",
+          cost: 2,
+          hints: "Skip Trust ↑ · Packet evidence · Stress ↑",
+          effects: [E.trust("skip", 4), E.meter("packet", 1), E.meter("stress", 3)],
+          cause: "Self-review written with evidence",
+        },
+        {
+          id: "team",
+          label: "Ask the team for their highlights",
+          cost: 1,
+          hints: "Skip Trust ↑ · Team Energy ↓",
+          effects: [E.trust("skip", 2), E.team("energy", -1)],
+          cause: "Self-review built from the team’s highlights",
+        },
+        {
+          id: "short",
+          label: "One honest paragraph",
+          cost: 0,
+          hints: "Time saved · Trust risk",
+          effects: [E.meter("stress", -1), E.chance(0.5, "Short and sharp", [], [E.trust("skip", -3)], "Too short to land")],
+          cause: "A one-paragraph self-review",
+        },
+      ],
+      ignoreHint: "Skip Trust ↓",
+      ignoreEffects: [E.trust("skip", -4)],
+      ignoreCause: "No self-review on file",
+    }),
+  },
+  {
     id: "demo_day",
     cat: "PEOPLE",
     canBeRequired: false,
     oncePer: "quarter",
-    weight: (s) => (s.projects.some(shipped) ? 2 : 0),
+    // Strongest the week after a launch, while it's still news.
+    weight: (s) => ((s.lastWeek?.projects ?? []).some((p) => p.status === "shipped" || p.status === "late-shipped") ? 4 : s.projects.some(shipped) ? 1 : 0),
     setup: (ctx) => {
-      const p = ctx.s.projects.find(shipped);
+      const latest = (ctx.s.lastWeek?.projects ?? []).find((p) => p.status === "shipped" || p.status === "late-shipped");
+      const p = ctx.s.projects.find((x) => x.id === latest?.id) ?? [...ctx.s.projects].reverse().find(shipped);
       const e = by(ctx.s.engineers, (x) => x.attrs.ambition)[0];
       return p && e ? { ...ctx, project: p, subject: e } : null;
     },

@@ -40,12 +40,17 @@ export function newQuarter(s: GameState): GameState {
         hire.tenure = "new";
         d.engineers.push(hire);
       }
-      d.projects = makeProjects(rng, d.company, d.level, d.nextId, d.projects.map((p) => p.name));
+      // Each quarter asks a little more: the team got better, so the roadmap got bigger.
+      const scope = Math.min(140, 100 + 10 * (d.quarter - 1));
+      d.projects = makeProjects(rng, d.company, d.level, d.nextId, d.projects.map((p) => p.name), scope);
       d.nextId += 10;
     }
     for (const e of d.engineers) {
       e.attrs.energy = Math.min(20, e.attrs.energy + 3);
+      // A new quarter resets the mood halfway: last quarter's high (or low) doesn't carry in full.
+      e.attrs.morale = Math.round(14 + (e.attrs.morale - 14) / 2);
       e.projectId = null;
+      delete e.awayFrom;
     }
     autoAssign(d.engineers, d.projects);
     // Promises still open at quarter end (made too late to come due) carry over to week 2.

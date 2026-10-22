@@ -12,6 +12,7 @@ import {
   produce,
   WEEKLY_STRESS_DECAY,
 } from "./plan";
+import { forecast } from "./forecast";
 import { makeRng, type Rng } from "./rng";
 import { makeEngineer, makeFollowOn, TEAM_SIZE } from "./setup";
 import type {
@@ -254,12 +255,16 @@ class Resolver {
         }
         case "assign": {
           const e = this.eng(ef.who);
-          if (e && this.d.projects.some((p) => p.id === ef.project && p.status === "active")) e.projectId = ef.project;
+          if (e && this.d.projects.some((p) => p.id === ef.project && p.status === "active")) {
+            e.projectId = ef.project;
+            delete e.awayFrom;
+          }
           break;
         }
         case "away": {
           const e = this.eng(ef.who);
           if (e) {
+            if (e.projectId) e.awayFrom = e.projectId;
             e.projectId = null;
             this.handOffPager(e);
           }
@@ -434,7 +439,8 @@ export function resolveWeek(s: GameState): GameState {
       gains[p.id] = { gain: p.progress - before, team: team.length };
       if (team.length) {
         r.cause(`${p.name} progress`, p.progress - before, `${team.map(first).join(" + ")} on the work`);
-        const onTrack = p.progress >= Math.round((p.scope * Math.min(1, (d.week - p.startWeek + 1) / (p.dueWeek - p.startWeek + 1))));
+        // The same forecast the Projects screen shows, from next week at today's staffing.
+        const onTrack = p.progress >= p.scope || forecast(p, d.engineers, d.techDebt, d.week + 1).kind === "on-track";
         r.line(
           `${p.name}: ${team.map(first).join(" and ")} add ${p.progress - before} points. <b class="${onTrack ? "good" : "bad"}">${onTrack ? "On track." : "Behind."}</b>`,
           "Staffing → delivery",
@@ -468,7 +474,8 @@ export function resolveWeek(s: GameState): GameState {
         shippedNames.push(p.name);
         r.line(`${p.name} ships${late ? ", late" : ""}. <b class="good">Released.</b>`, "Delivery → Trust and Reputation", "good");
         // The backlog refills: the same team rolls onto the next thing, as a stretch goal.
-        const next = makeFollowOn(rng, d.company, p, d.week, d.projects.map((x) => x.name), `p${d.nextId++}`);
+        const weekly = team.reduce((n, e) => n + engineerOutput(e, d.techDebt), 0);
+        const next = makeFollowOn(rng, d.company, p, d.week, d.projects.map((x) => x.name), `p${d.nextId++}`, weekly);
         if (next) {
           d.projects.push(next);
           for (const e of team) e.projectId = next.id;
@@ -504,11 +511,13 @@ export function resolveWeek(s: GameState): GameState {
 
     // 5. On-call and incidents.
     let escalated = false;
+    let incident: WeekResult["incident"];
     const oncall = d.plan.oncallId ? r.eng(d.plan.oncallId) : undefined;
     if (oncall) r.attr(oncall, "energy", -1, "On call this week");
     const pIncident = COMPANIES[d.company].incidentBase + d.techDebt / 250 + d.oncallLoad / 400;
     if (rng.chance(pIncident)) {
       d.stats.incidents++;
+      incident = { oncallId: oncall?.id ?? null, escalated: false };
       const who = oncall ? `${first(oncall)} is on call (Debugging ${oncall.attrs.debugging}, Energy ${oncall.attrs.energy})` : "Nobody is on call";
       r.line(`PagerDuty fires. ${who}…`, "Incident roll · Tech Debt and On-call Load raise the odds", undefined, 15);
       const pFix = oncall ? 0.3 + (oncall.attrs.debugging / 20) * 0.5 + (oncall.attrs.energy / 20) * 0.15 : 0;
@@ -526,7 +535,8 @@ export function resolveWeek(s: GameState): GameState {
         if (oncall) r.attr(oncall, "energy", -3, "Three-hour incident");
         if (stripe) d.pendingPostmortem = { role: "skip", hit };
         escalated = true;
-        r.line(`…it escalates to you. Rollback takes three hours. <b class="bad">Tech Debt +3.</b>`, oncall ? "On-call mismatch → longer recovery" : "No one on call → long recovery", "bad");
+        incident!.escalated = true;
+        r.line(`…it escalates to you. Rollback takes three hours. <b class="bad">Tech Debt +3.</b>`, oncall ? "Fix roll missed → long recovery" : "No one on call → long recovery", "bad");
       }
     } else {
       r.meter("oncallLoad", -3, "A quiet week on the pager");
@@ -605,6 +615,7 @@ export function resolveWeek(s: GameState): GameState {
         : `${badN} things went wrong this week. Someone has already scheduled a retro about the retro.`,
       good,
       keynote,
+      incident,
       projects,
     };
     d.phase = "friday";

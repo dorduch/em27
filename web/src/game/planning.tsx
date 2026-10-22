@@ -66,8 +66,15 @@ function SinceFriday({ s }: { s: GameState }) {
     ...projects.filter((p) => p.status === "missed").map((p) => `${p.name} missed its date`),
     ...projects.filter((p) => p.status === "active" && p.gain === 0).map((p) => `${p.name} stalled`),
   ];
-  const biggest = [...w.causes]
-    .filter((c) => !c.subject.endsWith("progress") && !c.subject.endsWith(" left the team"))
+  // Net each number over the week ("Tech Debt −12 · Tech Debt +5" reads as one change of −7).
+  const net = new Map<string, number>();
+  for (const c of w.causes) {
+    if (c.subject.endsWith("progress") || c.subject.endsWith(" left the team")) continue;
+    net.set(c.subject, (net.get(c.subject) ?? 0) + c.delta);
+  }
+  const biggest = [...net.entries()]
+    .map(([subject, delta]) => ({ subject, delta }))
+    .filter((c) => c.delta !== 0)
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
     .slice(0, events.length ? 1 : 2)
     .map((c) => `${c.subject} ${c.delta > 0 ? "+" : "−"}${Math.abs(c.delta)}`);

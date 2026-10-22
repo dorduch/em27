@@ -546,7 +546,8 @@ const burnout: Storyline = {
 
     back: {
       build: ({ subject: e, s }) => {
-        const p = projectOf(s, e) ?? active(s)[0];
+        const staffed = projectOf(s, e);
+        const p = staffed ?? s.projects.find((x) => x.id === e.awayFrom && x.status === "active") ?? active(s)[0];
         return {
           from: e.name,
           fromRole: levelTitle(e),
@@ -565,7 +566,7 @@ const burnout: Storyline = {
               ? [
                   {
                     id: "ship",
-                    label: `Put them straight back on ${p.name}`,
+                    label: staffed ? `Point them at the ${p.name} deadline` : `Put them straight back on ${p.name}`,
                     cost: 0,
                     hints: "Progress ↑ · Energy ↓",
                     effects: [E.assign(e.id, p.id), E.progress(p.id, 5), E.attr(e.id, "energy", -2), end("recovered")],
@@ -1393,41 +1394,45 @@ const planning: Storyline = {
     // The loan is over. Do they want to come back?
     away: {
       route: ({ subject: e }) => (e.attrs.morale >= 14 && e.loyalty >= 12 ? { goto: "roadmap" } : show),
-      build: ({ subject: e, peer }) => ({
-        from: e.name,
-        fromRole: `${levelTitle(e)} · on loan`,
-        title: "“They asked if I want to stay”",
-        body: `${peer.name.split(" ")[0]}’s team ships fast and has a new framework. ${first(e)} sounds embarrassed and a little excited.`,
-        intents: [
-          {
-            id: "release",
-            label: "Let them transfer",
-            cost: 1,
-            hints: `${first(e)} leaves · Peer Trust ↑ · Reputation ↑`,
-            effects: [E.trust("peer", 6), E.meter("reputation", 1), E.leave(e.id), end("transferred")],
-            cause: "Let them transfer for good",
-          },
-          {
-            id: "better",
-            label: "Bring them back to a bigger project",
-            cost: 1,
-            hints: "Morale ↑ · Loyalty ↑ · Peer Trust ↓",
-            effects: [E.attr(e.id, "morale", 2), E.loyalty(e.id, 2), E.trust("peer", -2), next("roadmap", 1)],
-            cause: "Brought them back with more scope",
-          },
-          {
-            id: "monday",
-            label: "“You’re back on Monday.”",
-            cost: 0,
-            hints: "Morale ↓ · Loyalty ↓ · Leave risk",
-            effects: [E.attr(e.id, "morale", -3), E.loyalty(e.id, -2), E.chance(0.25, "They took the transfer anyway", [E.leave(e.id, "transfer"), end("transferred")], [next("roadmap", 1)])],
-            cause: "Ordered them back",
-          },
-        ],
-        ignoreHint: "Morale ↓ · Leave risk",
-        ignoreEffects: [E.attr(e.id, "morale", -2), E.chance(0.5, "They stayed over there", [E.leave(e.id, "transfer"), end("transferred")], [next("roadmap", 1)])],
-        ignoreCause: "Nobody asked them back",
-      }),
+      build: ({ subject: e, peer, s }) => {
+        const home = s.projects.find((x) => x.id === e.awayFrom && x.status === "active") ?? active(s)[0];
+        const back = home ? [E.assign(e.id, home.id)] : [];
+        return {
+          from: e.name,
+          fromRole: `${levelTitle(e)} · on loan`,
+          title: "“They asked if I want to stay”",
+          body: `${peer.name.split(" ")[0]}’s team ships fast and has a new framework. ${first(e)} sounds embarrassed and a little excited.`,
+          intents: [
+            {
+              id: "release",
+              label: "Let them transfer",
+              cost: 1,
+              hints: `${first(e)} leaves · Peer Trust ↑ · Reputation ↑`,
+              effects: [E.trust("peer", 6), E.meter("reputation", 1), E.leave(e.id, "transfer"), end("transferred")],
+              cause: "Let them transfer for good",
+            },
+            {
+              id: "better",
+              label: "Bring them back to a bigger project",
+              cost: 1,
+              hints: "Morale ↑ · Loyalty ↑ · Peer Trust ↓",
+              effects: [...back, E.attr(e.id, "morale", 2), E.loyalty(e.id, 2), E.trust("peer", -2), next("roadmap", 1)],
+              cause: "Brought them back with more scope",
+            },
+            {
+              id: "monday",
+              label: "“You’re back on Monday.”",
+              cost: 0,
+              hints: "Morale ↓ · Loyalty ↓ · Leave risk",
+              effects: [E.attr(e.id, "morale", -3), E.loyalty(e.id, -2), E.chance(0.25, "They took the transfer anyway", [E.leave(e.id, "transfer"), end("transferred")], [...back, next("roadmap", 1)], "They came back, grudgingly")],
+              cause: "Ordered them back",
+            },
+          ],
+          ignoreHint: "Morale ↓ · Leave risk",
+          ignoreEffects: [E.attr(e.id, "morale", -2), E.chance(0.5, "They stayed over there", [E.leave(e.id, "transfer"), end("transferred")], [next("roadmap", 1)])],
+          ignoreCause: "Nobody asked them back",
+        };
+      },
     },
 
     roadmap: {

@@ -43,8 +43,8 @@ const ctxFor = (s: GameState): EventCtx => ({
 describe("event content", () => {
   const all = states();
 
-  it("has 24 one-off event types and storylines with unique ids that the director route accepts", () => {
-    expect(EVENT_TYPES.length).toBe(24);
+  it("has 25 one-off event types and storylines with unique ids that the director route accepts", () => {
+    expect(EVENT_TYPES.length).toBe(25);
     const ids = [...EVENT_TYPES.map((t) => t.id), ...STORYLINES.map((x) => x.id)];
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) expect(`${id}:0`).toMatch(/^[a-z0-9_]+:\d$/);

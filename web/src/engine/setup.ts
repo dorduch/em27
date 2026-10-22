@@ -71,6 +71,7 @@ export function makeProjects(
   level: Exclude<Level, "Director">,
   idBase: number,
   exclude: string[] = [],
+  scope = 100,
 ): Project[] {
   // Fresh names each quarter: last quarter's projects shipped (or died), they don't come back.
   const pool = COMPANIES[company].projectNames;
@@ -83,7 +84,7 @@ export function makeProjects(
     id: `p${idBase + i}`,
     name: names[i],
     owner: owners[i],
-    scope: 100,
+    scope,
     progress: 0,
     startWeek: 1,
     dueWeek: dues[i],
@@ -101,14 +102,16 @@ export const FOLLOW_ON_LAST_WEEK = 9;
  * The next thing on the backlog, arriving the Monday after `shipped` ships. A stretch goal: sized to the
  * weeks left, due at quarter end, and it only counts toward Delivery if shipping it helps.
  */
-export function makeFollowOn(rng: Rng, company: CompanyId, shipped: Project, week: number, taken: string[], id: string): Project | null {
+export function makeFollowOn(rng: Rng, company: CompanyId, shipped: Project, week: number, taken: string[], id: string, weekly: number): Project | null {
   const names = COMPANIES[company].projectNames.filter((n) => !taken.includes(n));
   if (!names.length || week > FOLLOW_ON_LAST_WEEK) return null;
+  // Sized so the team that rolls onto it can just about finish by week 12: a stretch, not a lost cause.
+  const scope = Math.round(Math.max(30, Math.min(80, weekly * (12 - week) * 0.9)) / 5) * 5;
   return {
     id,
     name: rng.pick(names),
     owner: shipped.owner,
-    scope: Math.min(80, 20 * (12 - week)),
+    scope,
     progress: 0,
     startWeek: week + 1,
     dueWeek: 12,

@@ -4,7 +4,7 @@
 import { expectedProgress } from "@/content/events";
 import { STORYLINES } from "@/content/storylines";
 import { forecastAll } from "./forecast";
-import { candidatePool, now, regularQuota, rememberTypes, settleArcs, validatePlan } from "./inbox";
+import { candidatePool, now, regularQuota, rememberTypes, settleArcs, repairPlan } from "./inbox";
 import { produce } from "./plan";
 import type { DirectorPlan, GameState } from "./types";
 
@@ -25,6 +25,8 @@ export interface DirectorCandidate {
   from: string;
   /** The engineer the demand is about, if any, with the numbers that matter. */
   person: { name: string; morale: number; energy: number } | null;
+  /** A second person the demand involves (the reviewer, the other side of a feud), or null. */
+  alsoAbout: string | null;
   project: string | null;
 }
 
@@ -118,6 +120,7 @@ export function directorBrief(s: GameState): DirectorBrief | null {
         title: body.title,
         from: body.from,
         person: e ? { name: e.name, morale: e.attrs.morale, energy: e.attrs.energy } : null,
+        alsoAbout: c.ctx.other?.name ?? null,
         project: c.ctx.project?.name ?? null,
       };
     }),
@@ -131,7 +134,7 @@ export function directorBrief(s: GameState): DirectorBrief | null {
 export function applyDirectorPlan(s: GameState, plan: DirectorPlan): { state: GameState; accepted: boolean } {
   const next = nextWeekPreview(s);
   if (!next) return { state: s, accepted: false };
-  const valid = validatePlan(next, candidatePool(next), plan);
+  const valid = repairPlan(next, candidatePool(next), plan);
   if (!valid) return { state: s, accepted: false };
   return { state: produce(s, (d) => void (d.directorPlan = valid)), accepted: true };
 }

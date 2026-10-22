@@ -49,6 +49,7 @@ export interface Engineer {
   revealed: Trait[];
   scout: number; // accumulated 1:1 discovery progress
   projectId: string | null;
+  awayFrom?: string; // the project they stepped off for a loan or a week off, so they can go back to it
   log: Cause[]; // most recent first, trimmed
 }
 
@@ -227,6 +228,8 @@ export interface WeekResult {
   recap: string;
   good: boolean;
   keynote?: "shipped" | "missed";
+  /** This week's pager: who carried it when it fired, and whether it escalated to you. */
+  incident?: { oncallId: string | null; escalated: boolean };
   projects?: ProjectWeek[]; // absent in saves from before this field existed
 }
 

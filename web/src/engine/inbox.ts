@@ -234,26 +234,42 @@ export function randomPicks(s: GameState, pool: Candidate[]): { picks: string[];
 }
 
 /**
- * Check a director plan against this week's pool. Returns null when anything is off,
- * so the caller falls back to the random draw.
+ * Make a director plan legal for this week's pool instead of throwing it away. Keeps the director's
+ * picks in its order, drops unknown ids, repeated types, a second new storyline and anyone who already
+ * has a demand or a beat this week, then tops up from the weighted draw under the same rules.
+ * Returns null only when the plan is for another week.
  */
-export function validatePlan(s: GameState, pool: Candidate[], plan: DirectorPlan | null): DirectorPlan | null {
+export function repairPlan(s: GameState, pool: Candidate[], plan: DirectorPlan | null): DirectorPlan | null {
   if (!plan || plan.quarter !== s.quarter || plan.week !== s.week) return null;
+  const rng = makeRng(s.seed, s.quarter, s.week, "repair");
   const byId = new Map(pool.map((c) => [c.id, c]));
-  const want = regularQuota(s, pool);
-  if (plan.picks.length !== want || new Set(plan.picks).size !== want) return null;
-  const types = new Set<string>();
+  const people = (c: Candidate) => [c.ctx.subject?.id, c.ctx.other?.id].filter((x): x is string => !!x);
+  const busy = new Set(settleArcs(s).due.flatMap(({ arc }) => (arc.otherId ? [arc.subjectId, arc.otherId] : [arc.subjectId])));
+  const quota = regularQuota(s, pool);
+  const picks: Candidate[] = [];
+  const fits = (c: Candidate) =>
+    picks.length < quota && !picks.some((p) => p.type === c.type || (p.storyline && c.storyline)) && !people(c).some((x) => busy.has(x));
+  const take = (c: Candidate) => {
+    picks.push(c);
+    for (const x of people(c)) busy.add(x);
+  };
   for (const id of plan.picks) {
     const c = byId.get(id);
-    if (!c || types.has(c.type.id)) return null;
-    types.add(c.type.id);
+    if (c && fits(c)) take(c);
   }
-  if (plan.picks.filter((id) => byId.get(id)!.storyline).length > 1) return null;
-  const hasRequiredOption = plan.picks.some((id) => byId.get(id)!.type.canBeRequired);
-  if (hasRequiredOption) {
-    if (!plan.requiredId || !plan.picks.includes(plan.requiredId) || !byId.get(plan.requiredId)!.type.canBeRequired) return null;
-  } else if (plan.requiredId) return null;
-  return plan;
+  for (let left = pool.filter(fits); left.length; left = left.filter(fits)) {
+    const c = weightedPick(rng, left);
+    if (!c) break;
+    take(c);
+  }
+  const ids = picks.map((c) => c.id);
+  const asked = plan.requiredId && ids.includes(plan.requiredId) && byId.get(plan.requiredId)!.type.canBeRequired ? plan.requiredId : null;
+  return {
+    ...plan,
+    picks: ids,
+    requiredId: asked ?? picks.find((c) => c.type.canBeRequired)?.id ?? null,
+    rationale: Object.fromEntries(Object.entries(plan.rationale).filter(([id]) => ids.includes(id))),
+  };
 }
 
 /**
@@ -285,7 +301,7 @@ export function buildInbox(s: GameState): InboxItem[] {
   }
 
   const pool = candidatePool(s);
-  const plan = validatePlan(s, pool, s.directorPlan);
+  const plan = repairPlan(s, pool, s.directorPlan);
   const { picks, requiredId } = plan ?? randomPicks(s, pool);
   const byId = new Map(pool.map((c) => [c.id, c]));
 
@@ -316,7 +332,7 @@ export function buildInbox(s: GameState): InboxItem[] {
 
 /** Build Monday's inbox in place and record who chose it. Consumes the director plan. */
 export function fillInbox(d: GameState): void {
-  const plan = validatePlan(d, candidatePool(d), d.directorPlan);
+  const plan = repairPlan(d, candidatePool(d), d.directorPlan);
   d.inbox = buildInbox(d);
   const settled = settleArcs(d);
   d.arcs = settled.arcs;
