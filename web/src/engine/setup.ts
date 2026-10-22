@@ -23,9 +23,11 @@ const clamp = (v: number, lo = 1, hi = 20) => Math.max(lo, Math.min(hi, v));
 
 export function makeEngineer(rng: Rng, id: string, usedNames: Set<string>): Engineer {
   // First names stay unique within a squad so commentary like "Theo and Jonah" is unambiguous.
+  // Surnames too: two Lindqvists on a six-person team reads as a bug, not a coincidence.
   const usedFirst = new Set([...usedNames].map((n) => n.split(" ")[0]));
+  const usedLast = new Set([...usedNames].map((n) => n.split(" ")[1]));
   let name = "";
-  for (let i = 0; i < 80 && (!name || usedNames.has(name) || usedFirst.has(name.split(" ")[0])); i++) {
+  for (let i = 0; i < 80 && (!name || usedNames.has(name) || usedFirst.has(name.split(" ")[0]) || usedLast.has(name.split(" ")[1])); i++) {
     name = `${rng.pick(FIRST_NAMES)} ${rng.pick(LAST_NAMES)}`;
   }
   usedNames.add(name);

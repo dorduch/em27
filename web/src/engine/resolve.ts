@@ -61,6 +61,7 @@ export function engineerOutput(e: Engineer, techDebt: number): number {
 
 class Resolver {
   causes: Cause[] = [];
+  departures: { name: string; how: "quit" | "cut" | "transfer" }[] = [];
   lines: FridayLine[] = [];
   hires = 0;
   minute = 9 * 60 + 5;
@@ -138,6 +139,7 @@ class Resolver {
     this.d.engineers = this.d.engineers.filter((x) => x.id !== e.id);
     this.d.departuresThisQuarter += 1;
     this.d.stats.departed.push(e.name);
+    this.departures.push({ name: e.name, how });
     this.cause(`${first(e)} left the team`, -1, why);
     const said = how === "cut" ? "is cut in the reorg" : how === "transfer" ? "transfers to another team" : "hands in their notice";
     this.line(`${e.name} ${said}. <b class="bad">Headcount −1.</b>`, why, "bad");
@@ -324,8 +326,15 @@ const GOOD_HEADLINES = [
 const BAD_HEADLINES = [
   "Everything was on fire.<br>Including the roadmap.",
   "“Let’s take the learnings<br>into next week.”",
-  "The calendar had opinions.<br>So did the pager.",
+  "The calendar had opinions.<br>Nobody asked the calendar.",
 ];
+
+/** The front page says how someone left: a resignation, a cut and a transfer are different stories. */
+function departureHeadline(d: { name: string; how: "quit" | "cut" | "transfer" }): string {
+  if (d.how === "cut") return `${d.name}’s role is cut.<br>The spreadsheet had a column for it.`;
+  if (d.how === "transfer") return `${d.name} transfers out.<br>Their new team ships on Fridays.`;
+  return `${d.name} resigns.<br>The calendar invite says “Catch up :)”.`;
+}
 
 export function resolveWeek(s: GameState): GameState {
   if (s.phase !== "plan") return s;
@@ -335,7 +344,6 @@ export function resolveWeek(s: GameState): GameState {
     const used = planCost(s);
     const cap = s.capacity;
     let keynote: WeekResult["keynote"];
-    const departedBefore = d.stats.departed.length;
     r.line("The plan is locked. The calendar has opinions.", `Week ${d.week} · ${used}/${cap} slots booked`);
 
     // 1. Inbox decisions. Unanswered optional items resolve as ignored.
@@ -573,15 +581,14 @@ export function resolveWeek(s: GameState): GameState {
     const goodN = r.lines.filter((l) => l.tone === "good").length;
     const badN = r.lines.filter((l) => l.tone === "bad").length;
     const good = goodN >= badN;
-    const leftThisWeek = d.stats.departed.slice(departedBefore);
     // The headline reports what actually happened, most newsworthy first.
     const headline =
       keynote === "shipped"
         ? `On stage, on time.<br>${flagship!.name} is live.`
         : keynote === "missed"
           ? "An empty stage.<br>A very full Slack."
-          : leftThisWeek.length
-            ? `${leftThisWeek[0]} resigns.<br>The calendar invite says “Catch up :)”.`
+          : r.departures.length
+            ? departureHeadline(r.departures[0])
             : shippedNames.length
               ? `${shippedNames[0]} ships.<br>${escalated ? "The pager had notes." : "Nobody cried. Mostly."}`
               : missedNames.length

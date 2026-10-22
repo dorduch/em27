@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { COMPANIES, COMPANY_IDS, KEYNOTE_WEEK, PACKET_TARGET } from "@/content/companies";
 import { FAREWELLS } from "@/content/people";
 import { buildRecap, type Recap } from "@/engine/career";
+import { forecast } from "@/engine/forecast";
 import { deliveryScore, GRADES, teamScore, trustScore } from "@/engine/review";
 import type { CompanyId, GameState, Offer } from "@/engine/types";
 import { Badge, Btn, first, money, Rich } from "./ui";
@@ -193,7 +194,8 @@ export function CheckinScreen({ s, onDone }: { s: GameState; onDone: (focus: num
   const delivery = deliveryScore(s);
   const team = teamScore(s);
   const trust = trustScore(s);
-  const behind = s.projects.filter((p) => p.status === "active" && p.progress < (p.scope * (s.week - p.startWeek + 1)) / (p.dueWeek - p.startWeek + 1));
+  // The same forecast the Projects screen shows; stretch goals can't miss, so they don't count here.
+  const behind = s.projects.filter((p) => !p.stretch && ["behind", "stalled"].includes(forecast(p, s.engineers, s.techDebt, s.week).kind));
   const tired = s.engineers.filter((e) => e.attrs.energy <= 8);
   const weakest = [
     { k: 0, v: delivery },
@@ -230,7 +232,7 @@ export function CheckinScreen({ s, onDone }: { s: GameState; onDone: (focus: num
       <div className="panel">
         <div className="why">
           <b>Delivery · 40% · {delivery}</b>
-          <small>{behind.length ? `${behind.length} project${behind.length > 1 ? "s" : ""} behind schedule.` : "Projects tracking to plan."}</small>
+          <small>{behind.length ? `${behind.map((p) => p.name).join(" and ")} ${behind.length > 1 ? "are" : "is"} forecast to miss ${behind.length > 1 ? "their dates" : `week ${behind[0].dueWeek}`}.` : "Projects tracking to plan."}</small>
         </div>
         <div className="why">
           <b>Team health · 30% · {team}</b>

@@ -320,3 +320,25 @@ describe("pacing", () => {
     expect(deliveryScore({ ...s, week: 12, projects: [...core, stretch] })).toBe(100);
   });
 });
+
+describe("names and blame", () => {
+  it("never gives two teammates the same surname", () => {
+    for (const c of COMPANIES) {
+      for (let seed = 1; seed <= 40; seed++) {
+        const last = newGame(c, seed).engineers.map((e) => e.name.split(" ")[1]);
+        expect(new Set(last).size, `${c}/${seed}`).toBe(last.length);
+      }
+    }
+  });
+
+  it("only asks who to blame after a real escalation, and names who held the pager then", () => {
+    const blame = EVENT_TYPES.find((t) => t.id === "postmortem_name")!;
+    const s = newGame("Stripe", 5);
+    const quiet = { ...s, week: 4, stats: { ...s.stats, incidents: 3 } };
+    expect(blame.weight(quiet)).toBe(0);
+    const held = s.engineers[2];
+    const after = { ...quiet, plan: { ...quiet.plan, oncallId: s.engineers[0].id }, lastWeek: { ...(quiet.lastWeek ?? ({} as never)), incident: { oncallId: held.id, escalated: true } } } as GameState;
+    expect(blame.weight(after)).toBeGreaterThan(0);
+    expect(blame.setup(ctxFor(after), makeRng(1, "blame"))?.subject?.id).toBe(held.id);
+  });
+});
