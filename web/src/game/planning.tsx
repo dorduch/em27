@@ -416,7 +416,7 @@ export function SquadScreen({ s, go }: ScreenProps) {
               <small>
                 L{e.level} · {projectName(e.projectId)}
                 {s.plan.oncallId === e.id ? " · ON CALL" : ""}
-                {promoReady(e) ? " · PROMO READY" : ""}
+                {promoReady(e) ? (e.attrs.ambition >= 8 ? " · PROMO READY" : " · READY, NOT ASKING") : ""}
                 {s.plan.oneOnOnes.includes(e.id) ? " · 1:1" : ""}
               </small>
             </span>
@@ -524,7 +524,9 @@ export function PlayerScreen({ s, set, go, toast, id }: ScreenProps & { id: stri
           <Meter value={Math.round(promoCase(e) * 100)} label="Promo case" />
           <p>
             {promoReady(e) ? (
-              <b className="good">Ready. Skills clear the L{e.level + 1} bar.</b>
+              <b className="good">
+                Ready. Skills clear the L{e.level + 1} bar.{e.attrs.ambition < 8 ? ` Ambition is low, so ${first(e.name)} won’t push for it.` : ""}
+              </b>
             ) : (
               <b>
                 Skill average {skillAverage(e).toFixed(1)} of {promoBar(e)} needed.

@@ -76,7 +76,10 @@ const promo: Storyline = {
   // Ambition makes them ask; skills that clear the bar make them ask sooner. A promo case can come back
   // a quarter after the last one ended, so a career keeps climbing.
   weight: (s, e) =>
-    e.tenure !== "new" && (e.attrs.ambition >= 12 || (promoReady(e) && e.attrs.ambition >= 8)) && e.level >= 3 && e.level < 7 && !endedFor(s, "promo", e.id, 12) && !recently(s, "promo", 8)
+    e.tenure !== "new" &&
+    // A first ask can come from ambition alone; after a promo case, they only ask again once their skills clear the bar.
+    ((e.attrs.ambition >= 12 && !ended(s, "promo", e.id)) || (promoReady(e) && e.attrs.ambition >= 8)) &&
+    e.level >= 3 && e.level < 7 && !endedFor(s, "promo", e.id, 12) && !recently(s, "promo", 8)
       ? promoReady(e)
         ? 6
         : 3

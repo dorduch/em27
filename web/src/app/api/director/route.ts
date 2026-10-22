@@ -134,7 +134,8 @@ export async function POST(req: Request) {
     const client = new Anthropic({ timeout: 15_000, maxRetries: 1 });
     const response = await client.messages.parse({
       model: MODEL,
-      max_tokens: 1000,
+      // Haiku 5.5 thinks by default and thinking counts toward max_tokens: a tight cap cuts the JSON off.
+      max_tokens: 8000,
       system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
       messages: [
         {
@@ -145,6 +146,7 @@ export async function POST(req: Request) {
       output_config: { effort: "low", format: zodOutputFormat(schemaFor(brief)) },
     });
     if (response.stop_reason === "refusal") return fallback("Model declined", 502);
+    if (response.stop_reason === "max_tokens") return fallback("Reply cut off", 502);
     const out = response.parsed_output;
     if (!out) return fallback("Unparseable reply", 502);
     return Response.json({
@@ -164,6 +166,7 @@ export async function POST(req: Request) {
       },
     });
   } catch (error) {
+    console.error("director:", error instanceof Error ? `${error.name}: ${error.message.slice(0, 300)}` : error);
     if (error instanceof Anthropic.RateLimitError) return fallback("Upstream rate limit", 429);
     if (error instanceof Anthropic.AuthenticationError) return fallback("Bad API key");
     if (error instanceof Anthropic.APIError) return fallback(`Upstream error ${error.status}`, 502);
