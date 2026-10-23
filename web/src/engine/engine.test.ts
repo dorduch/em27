@@ -363,3 +363,76 @@ describe("AI director", () => {
     expect(monday.inbox.filter((i) => i.required).length).toBeLessThanOrEqual(1);
   });
 });
+
+describe("squad growth", () => {
+  const sum = (e: GameState["engineers"][number]) => e.attrs.coding + e.attrs.debugging + e.attrs.communication;
+
+  it("everyone starts with a hidden ceiling at or above their best skill, and a career record", () => {
+    for (const e of game().engineers) {
+      expect(e.potential).toBeGreaterThanOrEqual(Math.max(e.attrs.coding, e.attrs.debugging, e.attrs.communication));
+      expect(e.potential).toBeLessThanOrEqual(20);
+      expect(e.potentialKnown).toBe(false);
+      expect(e.career[0].kind).toBe("join");
+    }
+  });
+
+  it("a quarter of work grows skills, never past the ceiling, and records it at quarter end", () => {
+    let s = game(3);
+    const before = new Map(s.engineers.map((e) => [e.id, sum(e)]));
+    while (s.phase !== "review") s = playWeek(s);
+    const grown = s.engineers.filter((e) => before.has(e.id) && sum(e) > before.get(e.id)!);
+    expect(grown.length).toBeGreaterThan(0);
+    for (const e of s.engineers) for (const k of ["coding", "debugging", "communication"] as const) {
+      if (e.attrs[k] > e.qStart[k]) expect(e.attrs[k]).toBeLessThanOrEqual(e.potential);
+    }
+    const next = applyReview(s);
+    if (next.phase === "plan") {
+      const e = next.engineers.find((x) => x.id === grown[0].id)!;
+      expect(e.career.some((c) => c.kind === "grow" && c.quarter === s.quarter)).toBe(true);
+      expect(sum(e)).toBe(e.qStart.coding + e.qStart.debugging + e.qStart.communication);
+    }
+  });
+
+  it("nobody grows while running on empty", () => {
+    let s = game(5);
+    s = { ...s, engineers: s.engineers.map((e) => ({ ...e, attrs: { ...e.attrs, energy: 3 }, growth: { coding: 99, debugging: 99, communication: 99 } })) };
+    const after = resolveWeek(s);
+    for (const e of after.engineers) {
+      const was = s.engineers.find((x) => x.id === e.id)!;
+      expect(e.attrs.coding).toBe(was.attrs.coding);
+    }
+  });
+
+  it("banked points turn into +1 on Friday, named on the back page", () => {
+    let s = game(5);
+    const target = s.engineers.find((e) => e.projectId && e.attrs.coding < e.potential)!;
+    s = { ...s, engineers: s.engineers.map((e) => (e.id === target.id ? { ...e, attrs: { ...e.attrs, energy: 15, morale: 15 }, growth: { ...e.growth, coding: 20 } } : e)) };
+    const after = resolveWeek(s);
+    expect(after.engineers.find((e) => e.id === target.id)!.attrs.coding).toBe(target.attrs.coding + 1);
+    expect(after.lastWeek!.growth!.some((g) => g.id === target.id && g.skill === "coding")).toBe(true);
+  });
+
+  it("1:1s reveal potential once traits and loyalty are known", () => {
+    let s = game(8);
+    const id = s.engineers[0].id;
+    s = { ...s, engineers: s.engineers.map((e) => (e.id === id ? { ...e, loyaltyKnown: true, revealed: [...e.traits], scout: 5 } : e)) };
+    s = toggleOneOnOne(s, id);
+    const after = resolveWeek(s);
+    expect(after.engineers.find((e) => e.id === id)!.potentialKnown).toBe(true);
+  });
+
+  it("a promotion is celebrated, recorded in the career and makes the headline", () => {
+    let s = game(9);
+    const e = s.engineers[0];
+    const item = s.inbox[0];
+    s = {
+      ...s,
+      inbox: [{ ...item, required: false, intents: [{ id: "go", label: "Promote", cost: 0, hints: "", cause: "Calibration", effects: [{ k: "levelUp", who: e.id }] }] }],
+      plan: { ...s.plan, choices: { [item.id]: "go" } },
+    };
+    const after = resolveWeek(s);
+    expect(after.lastWeek!.promotions).toEqual([{ id: e.id, name: e.name, from: e.level, to: e.level + 1 }]);
+    expect(after.engineers[0].career.at(-1)!.kind).toBe("promo");
+    expect(after.lastWeek!.headline).toContain(e.name);
+  });
+});

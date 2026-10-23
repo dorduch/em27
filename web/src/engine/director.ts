@@ -5,6 +5,7 @@ import { expectedProgress } from "@/content/events";
 import { STORYLINES } from "@/content/storylines";
 import { forecastAll } from "./forecast";
 import { candidatePool, now, regularQuota, rememberTypes, settleArcs, repairPlan } from "./inbox";
+import { promoReady } from "./growth";
 import { produce } from "./plan";
 import type { DirectorPlan, GameState } from "./types";
 
@@ -39,7 +40,8 @@ export interface DirectorBrief {
   pick: number;
   /** `staff` is who works on it; `forecastFinishWeek` is when it ships at current staffing (null: never). */
   projects: { name: string; percent: number; expectedPercent: number; dueWeek: number; status: string; flagship: boolean; staff: string[]; forecastFinishWeek: number | null }[];
-  team: { name: string; morale: number; energy: number; loyalty: number | null; traits: string[]; project: string | null; onCall: boolean }[];
+  /** `promoReady`: their skills clear the bar for the next level, so a promo story fits them. */
+  team: { name: string; level: number; promoReady: boolean; morale: number; energy: number; loyalty: number | null; traits: string[]; project: string | null; onCall: boolean }[];
   /** Who carries the pager next week, or null when nobody does. */
   onCall: string | null;
   trust: Record<string, number>;
@@ -80,6 +82,8 @@ export function directorBrief(s: GameState): DirectorBrief | null {
     })),
     team: next.engineers.map((e) => ({
       name: e.name,
+      level: e.level,
+      promoReady: promoReady(e),
       morale: e.attrs.morale,
       energy: e.attrs.energy,
       loyalty: e.loyaltyKnown ? e.loyalty : null,

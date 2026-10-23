@@ -30,6 +30,7 @@ Aim for a quarter that feels like a story:
 Ground every pick in the brief:
 - Who carries the pager is onCall (and team[].onCall). Only someone on call can be haunted by the pager.
 - Who works on a project is projects[].staff. Never place a person on a project they are not staffed on.
+- team[].promoReady means that engineer's skills clear the bar for the next level. A promo storyline about them is a payoff the player earned: prefer it when it is a candidate.
 - A project is behind only when forecastFinishWeek is null or later than dueWeek; that is what the player sees. Don't describe an on-track project as slipping or blown.
 
 Write each reason as one short sentence (under 16 words) for a game designer reading a debug view. A reason may only cite facts that appear in the brief, and only about that candidate's own person, sender or project; never attribute a number to someone else. Refer to people by name or as "they"; never guess anyone's gender or use he/she/him/her. Write arcNote as one sentence on where the quarter is heading.`;
@@ -133,7 +134,8 @@ export async function POST(req: Request) {
     const client = new Anthropic({ timeout: 15_000, maxRetries: 1 });
     const response = await client.messages.parse({
       model: MODEL,
-      max_tokens: 1000,
+      // Haiku 5.5 thinks by default and thinking counts toward max_tokens: a tight cap cuts the JSON off.
+      max_tokens: 8000,
       system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
       messages: [
         {
@@ -144,6 +146,7 @@ export async function POST(req: Request) {
       output_config: { effort: "low", format: zodOutputFormat(schemaFor(brief)) },
     });
     if (response.stop_reason === "refusal") return fallback("Model declined", 502);
+    if (response.stop_reason === "max_tokens") return fallback("Reply cut off", 502);
     const out = response.parsed_output;
     if (!out) return fallback("Unparseable reply", 502);
     return Response.json({
@@ -163,6 +166,7 @@ export async function POST(req: Request) {
       },
     });
   } catch (error) {
+    console.error("director:", error instanceof Error ? `${error.name}: ${error.message.slice(0, 300)}` : error);
     if (error instanceof Anthropic.RateLimitError) return fallback("Upstream rate limit", 429);
     if (error instanceof Anthropic.AuthenticationError) return fallback("Bad API key");
     if (error instanceof Anthropic.APIError) return fallback(`Upstream error ${error.status}`, 502);

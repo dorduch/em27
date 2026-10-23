@@ -14,9 +14,20 @@ export const initials = (name: string) =>
     .map((n) => n[0])
     .join("");
 
-export function Num({ v }: { v: number | "?" }) {
+/** A 1–20 attribute. `up` is the change since the quarter started, shown as a small arrow. */
+export function Num({ v, up = 0 }: { v: number | "?"; up?: number }) {
   if (v === "?") return <span className="num">?</span>;
-  return <span className={`num ${v <= 7 ? "bad" : v <= 13 ? "warn" : "good"}`}>{v}</span>;
+  return (
+    <span className={`num ${v <= 7 ? "bad" : v <= 13 ? "warn" : "good"}`}>
+      {v}
+      {up !== 0 && (
+        <sup className={`trend ${up > 0 ? "good" : "bad"}`} aria-label={`${up > 0 ? "up" : "down"} ${Math.abs(up)} this quarter`}>
+          {up > 0 ? "▲" : "▼"}
+          {Math.abs(up) > 1 ? Math.abs(up) : ""}
+        </sup>
+      )}
+    </span>
+  );
 }
 
 export function Badge({ company }: { company: CompanyId }) {
